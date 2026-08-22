@@ -1,0 +1,225 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  a { color: #7c5a1e; }
+  a:hover { color: #a97729; }
+  .root { width: 1440px; height: 900px; position: relative; overflow: hidden; background: #ece0c4;
+    background-image: radial-gradient(ellipse at 15% 10%, rgba(255,255,255,0.35), transparent 55%),
+      radial-gradient(ellipse at 85% 90%, rgba(122,90,40,0.12), transparent 55%);
+    font-family: "EB Garamond", Georgia, serif; color: #3a2a1a; display: flex; flex-direction: column; }
+  .display { font-family: "Cinzel", "Georgia", serif; letter-spacing: 0.02em; }
+  .grain { position: absolute; inset: 0; pointer-events: none; opacity: 0.05; mix-blend-mode: multiply;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+  .topbar { height: 72px; flex-shrink: 0; display: flex; align-items: center; gap: 24px; padding: 0 24px;
+    background: linear-gradient(180deg, #f4ead2, #e9dab5); border-bottom: 2px solid #8a6a3f; position: relative; z-index: 2; }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .crest { width: 34px; height: 34px; flex-shrink: 0; color: #7c5a1e; }
+  .brand-text { display: flex; flex-direction: column; line-height: 1.1; }
+  .brand-title { font-size: 13px; letter-spacing: 0.08em; color: #6b5738; }
+  .brand-year { font-size: 22px; font-weight: 600; }
+  .role-tabs { display: flex; gap: 4px; background: #ddc99a; padding: 4px; border-radius: 999px; border: 1px solid #b79b6b; }
+  .role-tab { padding: 7px 18px; border-radius: 999px; font-size: 15px; letter-spacing: 0.03em; color: #6b5738; }
+  .role-tab.active { background: #a97729; color: #f8f1de; box-shadow: 0 1px 2px rgba(0,0,0,0.25); }
+  .spacer { flex: 1 1 auto; }
+  .war-gauge { display: flex; flex-direction: column; gap: 3px; width: 190px; }
+  .war-gauge-label { display: flex; justify-content: space-between; font-size: 12px; color: #6b5738; letter-spacing: 0.04em; }
+  .war-gauge-track { height: 8px; border-radius: 4px; background: #d8c497; border: 1px solid #b79b6b; overflow: hidden; }
+  .war-gauge-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #7c2222, #a94b3f); }
+  .treasury { display: flex; align-items: center; gap: 6px; font-size: 17px; padding: 6px 12px; background: #ddc99a; border: 1px solid #b79b6b; border-radius: 8px; }
+  .treasury svg { width: 18px; height: 18px; color: #7c5a1e; }
+  .end-turn-btn { display: flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 8px;
+    background: linear-gradient(180deg, #c08a3a, #a06a24); color: #fbf3df; font-size: 15px; letter-spacing: 0.04em;
+    border: 1px solid #7c5a1e; box-shadow: 0 2px 4px rgba(60,40,10,0.35); }
+  .stepper { height: 40px; flex-shrink: 0; display: flex; align-items: center; gap: 6px; padding: 0 24px;
+    background: #e3d4ad; border-bottom: 1px solid #c3ac7c; position: relative; z-index: 2; }
+  .step { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #8a7554; }
+  .step-dot { width: 8px; height: 8px; border-radius: 50%; background: #b79b6b; }
+  .step.current { color: #5c2b1c; font-weight: 600; }
+  .step.current .step-dot { background: #7c2222; box-shadow: 0 0 0 3px rgba(124,34,34,0.18); }
+  .step-arrow { color: #b79b6b; font-size: 12px; margin: 0 2px; }
+  .body-row { flex: 1 1 auto; display: flex; min-height: 0; position: relative; z-index: 1; }
+  .rail { width: 64px; flex-shrink: 0; background: #e3d4ad; border-right: 1px solid #c3ac7c;
+    display: flex; flex-direction: column; align-items: center; gap: 10px; padding-top: 16px; }
+  .rail-btn { width: 42px; height: 42px; border-radius: 9px; display: flex; align-items: center; justify-content: center; color: #6b5738; }
+  .rail-btn.active { background: #a97729; color: #f8f1de; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
+  .rail-btn svg { width: 22px; height: 22px; }
+
+  .content { flex: 1 1 auto; overflow-y: auto; padding: 28px 32px; display: flex; gap: 24px; }
+  .main-col { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+  .page-title { font-size: 26px; font-weight: 600; }
+  .page-sub { font-size: 13.5px; color: #6b5738; }
+
+  .list-card { background: #f4ead2; border: 1px solid #c3ac7c; border-radius: 12px; overflow: hidden; }
+  .list-head { display: grid; grid-template-columns: 28px 1.4fr 1fr 1.6fr; gap: 12px; padding: 10px 18px;
+    font-size: 11.5px; letter-spacing: 0.06em; color: #8a7554; background: #e9dab5; border-bottom: 1px solid #c3ac7c; }
+  .list-row { display: grid; grid-template-columns: 28px 1.4fr 1fr 1.6fr; gap: 12px; align-items: center; padding: 14px 18px; border-bottom: 1px solid #ddc99a; }
+  .list-row:last-child { border-bottom: none; }
+  .list-row.selected { background: #ecdcae; }
+  .fac-swatch { width: 16px; height: 16px; border-radius: 4px; border: 1px solid rgba(0,0,0,0.25); }
+  .fac-name { font-size: 15px; }
+  .stance-chip { font-size: 12px; padding: 4px 10px; border-radius: 999px; display: inline-block; width: fit-content; letter-spacing: 0.02em; }
+  .stance-peace { background: #dbe4d3; color: #3f5c3a; border: 1px solid #93ab86; }
+  .stance-alliance { background: #d9e0ea; color: #33465c; border: 1px solid #8ba1bd; }
+  .stance-none { background: #e6ddc9; color: #8a7554; border: 1px solid #c3ac7c; }
+  .row-actions { display: flex; gap: 8px; justify-content: flex-end; }
+  .mini-btn { font-size: 12px; padding: 6px 12px; border-radius: 7px; border: 1px solid #b79b6b; color: #6b5738; white-space: nowrap; }
+  .mini-btn.danger { border-color: #a94b3f; color: #7c2222; }
+  .mini-btn.primary { background: linear-gradient(180deg, #c08a3a, #a06a24); color: #fbf3df; border-color: #7c5a1e; }
+
+  .detail-col { width: 360px; flex-shrink: 0; background: #f4ead2; border: 1px solid #c3ac7c; border-radius: 12px; padding: 20px; display: flex; flex-direction: column; gap: 16px; height: fit-content; }
+  .detail-eyebrow { font-size: 11px; letter-spacing: 0.1em; color: #8a7554; }
+  .detail-title-row { display: flex; align-items: center; justify-content: space-between; }
+  .detail-title { font-size: 22px; font-weight: 600; }
+  .compare-row { display: flex; flex-direction: column; gap: 6px; }
+  .compare-label { display: flex; justify-content: space-between; font-size: 12.5px; color: #6b5738; }
+  .compare-track { height: 8px; border-radius: 4px; background: #d8c497; border: 1px solid #b79b6b; overflow: hidden; display: flex; }
+  .compare-fill-a { height: 100%; background: #a97729; }
+  .compare-fill-b { height: 100%; background: #8a7554; }
+  .divider { height: 1px; background: #c3ac7c; }
+  .treaty-option { display: flex; flex-direction: column; gap: 4px; padding: 12px; background: #e9dab5; border: 1px solid #c3ac7c; border-radius: 9px; margin-bottom: 8px; }
+  .treaty-option:last-child { margin-bottom: 0; }
+  .treaty-name { font-size: 14px; }
+  .treaty-desc { font-size: 11.5px; color: #8a7554; line-height: 1.4; }
+  .note-box { font-size: 12.5px; color: #6b5738; line-height: 1.5; font-style: italic; background: #e9dab5; border: 1px dashed #b79b6b; border-radius: 9px; padding: 12px; }
+</style>
+</helmet>
+
+<div class="root">
+  <div class="grain"></div>
+
+  <div class="topbar">
+    <div class="brand">
+      <svg class="crest" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M12 2l7 3v6c0 5.5-3.2 8.3-7 10-3.8-1.7-7-4.5-7-10V5z"/><path d="M9 11l2 2 4-4"/></svg>
+      <div class="brand-text"><div class="brand-title">会議は踊る、されど進まず</div><div class="brand-year display">962年</div></div>
+    </div>
+    <div class="role-tabs"><div class="role-tab active">君主</div><div class="role-tab">宰相</div><div class="role-tab">戦闘隊長</div></div>
+    <div class="spacer"></div>
+    <div class="war-gauge"><div class="war-gauge-label"><span>大戦ゲージ</span><span>0 / 5 勢力 交戦中</span></div>
+      <div class="war-gauge-track"><div class="war-gauge-fill" style="width: 0%;"></div></div></div>
+    <div class="treasury"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/></svg>5,000</div>
+    <div class="end-turn-btn">ターンを進める<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M6 4l14 8-14 8z"/></svg></div>
+  </div>
+
+  <div class="stepper">
+    <div class="step"><span class="step-dot"></span>① 年始</div><span class="step-arrow">→</span>
+    <div class="step current"><span class="step-dot"></span>② 外交フェイズ（現在）</div><span class="step-arrow">→</span>
+    <div class="step"><span class="step-dot"></span>③ 行動</div><span class="step-arrow">→</span>
+    <div class="step"><span class="step-dot"></span>④ 戦闘解決</div><span class="step-arrow">→</span>
+    <div class="step"><span class="step-dot"></span>⑤ 年末集計</div>
+  </div>
+
+  <div class="body-row">
+    <div class="rail">
+      <div class="rail-btn" title="マップ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 6.5l2 5.5-2 6-2-6z" fill="currentColor" stroke="none"/></svg></div>
+      <div class="rail-btn" title="宮廷"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18h16"/><path d="M4 18l-1-9 5 4 4-7 4 7 5-4-1 9z"/></svg></div>
+      <div class="rail-btn active" title="外交"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="6" width="16" height="12" rx="1"/><circle cx="4" cy="6" r="1.4"/><circle cx="4" cy="18" r="1.4"/><circle cx="20" cy="6" r="1.4"/><circle cx="20" cy="18" r="1.4"/><path d="M8 10h8M8 14h5"/></svg></div>
+      <div class="rail-btn" title="傭兵市場"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l16 16M20 4L4 20"/><path d="M4 4l3 0M4 4l0 3M20 4l-3 0M20 4l0 3M4 20l3 0M4 20l0-3M20 20l-3 0M20 20l0-3"/></svg></div>
+      <div class="rail-btn" title="戦闘結果ログ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5c-2-1.5-5-2-8-1.5v13c3-.5 6 0 8 1.5 2-1.5 5-2 8-1.5v-13c-3-.5-6 0-8 1.5z"/><path d="M12 5v13"/></svg></div>
+      <div class="rail-btn" title="ターンサマリー"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12M6 21h12"/><path d="M7 3c0 4.5 4 6 5 6s5-1.5 5-6"/><path d="M7 21c0-4.5 4-6 5-6s5 1.5 5 6"/></svg></div>
+    </div>
+
+    <div class="content">
+      <div class="main-col">
+        <div>
+          <div class="page-title">外交 — 神聖ローマ帝国</div>
+          <div class="page-sub">各勢力との関係と条約コマンド。行は選択でき、右の詳細パネルが更新されます。</div>
+        </div>
+
+        <div class="list-card">
+          <div class="list-head"><span></span><span>勢力</span><span>関係</span><span style="text-align:right;">コマンド</span></div>
+
+          <div class="list-row selected">
+            <span class="fac-swatch" style="background:#5b7ea3"></span>
+            <span class="fac-name">西フランク王国</span>
+            <span class="stance-chip stance-peace">平和</span>
+            <div class="row-actions">
+              <div class="mini-btn">同盟を提案</div>
+              <div class="mini-btn">婚姻協定</div>
+              <div class="mini-btn danger">宣戦布告</div>
+            </div>
+          </div>
+
+          <div class="list-row">
+            <span class="fac-swatch" style="background:#8a3b3b"></span>
+            <span class="fac-name">教皇領</span>
+            <span class="stance-chip stance-alliance">同盟</span>
+            <div class="row-actions">
+              <div class="mini-btn">援軍を要請</div>
+              <div class="mini-btn">同盟破棄</div>
+            </div>
+          </div>
+
+          <div class="list-row">
+            <span class="fac-swatch" style="background:#6d5590"></span>
+            <span class="fac-name">東ローマ帝国</span>
+            <span class="stance-chip stance-peace">平和</span>
+            <div class="row-actions">
+              <div class="mini-btn">同盟を提案</div>
+              <div class="mini-btn">婚姻協定</div>
+              <div class="mini-btn danger">宣戦布告</div>
+            </div>
+          </div>
+
+          <div class="list-row">
+            <span class="fac-swatch" style="background:#6b6258"></span>
+            <span class="fac-name">自由傭兵団（傭兵）</span>
+            <span class="stance-chip stance-none">契約なし</span>
+            <div class="row-actions">
+              <div class="mini-btn primary">雇用交渉へ</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="detail-col">
+        <div>
+          <div class="detail-eyebrow">関係詳細 — SELECTED</div>
+          <div class="detail-title-row">
+            <div class="detail-title">西フランク王国</div>
+            <span class="stance-chip stance-peace">平和</span>
+          </div>
+        </div>
+
+        <div class="compare-row">
+          <div class="compare-label"><span>国力比較（自国 / 相手）</span></div>
+          <div class="compare-track"><div class="compare-fill-a" style="width: 58%;"></div><div class="compare-fill-b" style="width: 42%;"></div></div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div>
+          <div class="detail-eyebrow" style="margin-bottom:8px;">条約コマンド</div>
+          <div class="treaty-option">
+            <div class="treaty-name">同盟を提案する</div>
+            <div class="treaty-desc">相互防衛を約束。片方が宣戦されると自動的に参戦する。</div>
+          </div>
+          <div class="treaty-option">
+            <div class="treaty-name">婚姻協定を結ぶ</div>
+            <div class="treaty-desc">子女同士の政略結婚を提案し、関係値を大きく改善する。</div>
+          </div>
+          <div class="treaty-option">
+            <div class="treaty-name">宣戦布告する</div>
+            <div class="treaty-desc">戦争状態に移行。大戦ゲージに加算される。</div>
+          </div>
+        </div>
+
+        <div class="note-box">
+          「ロテール王は若く、宮廷は求心力を欠いている。同盟には前向きだが、婚姻協定にはまだ慎重な様子だ。」
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

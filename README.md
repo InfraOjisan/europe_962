@@ -5,6 +5,7 @@
 
 - 世界観・戦闘・勢力のコンセプト: [`gamesystem_europe.md`](./gamesystem_europe.md)
 - ゲームシステム概要設計（UI／処理）: [`docs/gamesystem_design.md`](./docs/gamesystem_design.md)
+- UIモックアップ（静的デザインキャンバス）: [`design/ui-mockup/`](./design/ui-mockup/)（[公開キャンバス](https://claude.ai/code/artifact/77f25624-c076-4af6-92d7-ca321893b909)）
 
 ## データモデル（TypeScript実装）
 

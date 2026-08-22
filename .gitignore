@@ -1,3 +1,6 @@
 node_modules/
 dist/
 *.log
+
+# Seeded Claude Design canvas output (large, generated from design/ui-mockup/*.dc.html)
+design/ui-mockup/europe-962-ui-mockup.html

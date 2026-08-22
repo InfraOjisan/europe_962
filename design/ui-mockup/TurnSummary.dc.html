@@ -1,0 +1,138 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=EB+Garamond:ital,wght@0,500;0,600;1,400&display=swap">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  a { color: #7c5a1e; }
+  a:hover { color: #a97729; }
+  .root { width: 1440px; height: 900px; position: relative; overflow: hidden; background: #ece0c4;
+    font-family: "EB Garamond", Georgia, serif; color: #3a2a1a; }
+  .display { font-family: "Cinzel", "Georgia", serif; letter-spacing: 0.02em; }
+
+  .backdrop { position: absolute; inset: 0; filter: grayscale(0.6) brightness(0.7); }
+  .backdrop svg { width: 100%; height: 100%; display: block; }
+  .dim { position: absolute; inset: 0; background: rgba(35,24,12,0.6); }
+
+  .modal { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 700px; background: #f4ead2; border: 2px solid #8a6a3f; border-radius: 14px;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.45); display: flex; flex-direction: column; overflow: hidden; }
+  .modal-head { padding: 24px 28px 16px; border-bottom: 2px solid #c3ac7c; text-align: center; }
+  .modal-eyebrow { font-size: 11px; letter-spacing: 0.1em; color: #8a7554; }
+  .modal-title { font-size: 26px; font-weight: 600; margin-top: 4px; }
+  .modal-sub { font-size: 13px; color: #6b5738; margin-top: 6px; }
+
+  .modal-body { padding: 20px 28px; display: flex; flex-direction: column; gap: 14px; }
+
+  .event-card { display: flex; gap: 14px; background: #e9dab5; border: 1px solid #c3ac7c; border-radius: 10px; padding: 16px; }
+  .event-icon { width: 44px; height: 44px; border-radius: 10px; background: #ddc99a; border: 1px solid #b79b6b;
+    display: flex; align-items: center; justify-content: center; color: #6b5738; flex-shrink: 0; }
+  .event-icon.warn { color: #7c2222; }
+  .event-icon svg { width: 22px; height: 22px; }
+  .event-text { flex: 1 1 auto; }
+  .event-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .event-title { font-size: 15.5px; }
+  .event-tag { font-size: 10.5px; padding: 2px 8px; border-radius: 999px; background: #ddc99a; color: #6b5738; border: 1px solid #b79b6b; }
+  .event-body { font-size: 13px; color: #4a3826; line-height: 1.6; }
+  .effect-row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .effect-chip { font-size: 11px; padding: 3px 9px; border-radius: 999px; background: #f4ead2; border: 1px solid #c3ac7c; color: #6b5738; }
+  .effect-chip.bad { color: #7c2222; border-color: #a94b3f; }
+  .effect-chip.good { color: #3f5c3a; border-color: #93ab86; }
+
+  .modal-foot { padding: 16px 28px; border-top: 1px solid #c3ac7c; display: flex; justify-content: center; }
+  .next-btn { padding: 10px 26px; border-radius: 8px; font-size: 14px; letter-spacing: 0.03em;
+    background: linear-gradient(180deg, #c08a3a, #a06a24); color: #fbf3df; border: 1px solid #7c5a1e; }
+
+  text.region-label { font-family: "Cinzel", serif; font-size: 15px; fill: #2a1d10; paint-order: stroke; stroke: #f4ead2; stroke-width: 4px; stroke-linejoin: round; }
+</style>
+</helmet>
+
+<div class="root">
+  <div class="backdrop">
+    <svg viewBox="0 0 1000 700">
+      <g stroke-width="2">
+        <polygon points="560,70 610,80 640,120 630,170 590,200 530,190 500,150 510,100" fill="#c9a24b" stroke="#8a6a2e"/>
+        <polygon points="560,245 615,255 645,300 635,360 590,395 530,385 505,335 515,275" fill="#c9a24b" stroke="#8a6a2e"/>
+        <polygon points="420,270 465,280 495,320 485,380 445,410 385,400 365,350 380,295" fill="#c9a24b" stroke="#8a6a2e"/>
+        <polygon points="240,170 300,180 335,220 325,290 280,325 195,310 165,255 185,200" fill="#5b7ea3" stroke="#35526e"/>
+        <polygon points="300,365 355,375 385,410 375,455 335,480 250,470 220,430 250,385" fill="#5b7ea3" stroke="#35526e"/>
+        <polygon points="560,435 605,445 630,485 615,530 575,555 520,540 505,495 520,455" fill="#8a3b3b" stroke="#5e2323"/>
+        <polygon points="615,565 665,575 690,610 680,650 630,670 570,655 555,615 575,580" fill="#6d5590" stroke="#453764"/>
+      </g>
+      <text class="region-label" x="560" y="140" text-anchor="middle">ザクセン</text>
+      <text class="region-label" x="560" y="325" text-anchor="middle">バイエルン</text>
+      <text class="region-label" x="420" y="350" text-anchor="middle">シュヴァーベン</text>
+      <text class="region-label" x="240" y="260" text-anchor="middle">西フランク</text>
+      <text class="region-label" x="300" y="430" text-anchor="middle">ブルゴーニュ</text>
+      <text class="region-label" x="560" y="510" text-anchor="middle">教皇領</text>
+      <text class="region-label" x="615" y="625" text-anchor="middle">東ローマ</text>
+    </svg>
+  </div>
+  <div class="dim"></div>
+
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-eyebrow">① 年始フェイズ</div>
+      <div class="modal-title display">971年、年が明けた</div>
+      <div class="modal-sub">今年もヨーロッパ各地で出来事が起きている。</div>
+    </div>
+
+    <div class="modal-body">
+      <div class="event-card">
+        <div class="event-icon warn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="9" r="6"/><path d="M9 15l-1.5 5M15 15l1.5 5M12 15v5"/><circle cx="9.5" cy="8" r="0.6" fill="currentColor" stroke="none"/><circle cx="14.5" cy="8" r="0.6" fill="currentColor" stroke="none"/></svg>
+        </div>
+        <div class="event-text">
+          <div class="event-title-row"><span class="event-title">疫病の流行</span><span class="event-tag">ブルゴーニュ</span></div>
+          <div class="event-body">交易路を通じて疫病がブルゴーニュに達した。人口と税収に深刻な打撃を与えている。</div>
+          <div class="effect-row">
+            <span class="effect-chip bad">人口 −8%</span>
+            <span class="effect-chip bad">税基盤 −15%</span>
+            <span class="effect-chip bad">駐留軍 戦意 −10%</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="event-card">
+        <div class="event-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="15" r="4.2"/><path d="M8 15a4 4 0 0 1 8 0"/><path d="M9 8c1-2 5-2 6 0"/></svg>
+        </div>
+        <div class="event-text">
+          <div class="event-title-row"><span class="event-title">後継者の誕生</span><span class="event-tag">神聖ローマ帝国</span></div>
+          <div class="event-body">オットー1世とアーデルハイトの間に第一子（男児）が誕生した。将来の政略結婚の駒として期待される。</div>
+          <div class="effect-row">
+            <span class="effect-chip good">子女 +1</span>
+            <span class="effect-chip good">宮廷の求心力 +</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="event-card">
+        <div class="event-icon warn">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3v4M9 7h6l1 14H8z"/><path d="M8 13h8"/></svg>
+        </div>
+        <div class="event-text">
+          <div class="event-title-row"><span class="event-title">宗教的緊張の高まり</span><span class="event-tag">教皇領</span></div>
+          <div class="event-body">教皇領内で聖職叙任をめぐる対立が表面化しつつある。放置すれば周辺勢力の関係にも波及しうる。</div>
+          <div class="effect-row">
+            <span class="effect-chip bad">教皇領 安定度 −</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-foot">
+      <div class="next-btn">外交フェイズへ進む</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
