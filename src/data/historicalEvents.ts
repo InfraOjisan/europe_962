@@ -14,10 +14,11 @@ import type { FactionId } from "../models/ids.js";
  * 整合するよう、必須イベントではなく任意でON/OFFできるシナリオイベントとして
  * 実装する（`eventEngine.ts` の `events` 引数に空配列を渡せば無効化できる）。
  *
- * 962年開始のサンプルシナリオ（神聖ローマ帝国・西フランク王国・教皇領・東ローマ帝国・
- * 自由傭兵団のみ）では、対象の勢力・州が存在しないイベント（ノルマン・コンクエスト、
- * マグナ・カルタ、レコンキスタ等、イングランド・イベリア方面のもの）は現状 no-op になる。
- * より広いシナリオデータが用意されれば、同じイベント定義がそのまま効果を持つようになる。
+ * 962年開始のサンプルシナリオ（設計書15章：神聖ローマ帝国の選帝侯・諸侯・回廊諸国、
+ * ポーランド、ハンガリー、イタリア諸国、イングランド、イベリア3王朝、東ローマ帝国、
+ * 自由傭兵団の27勢力）は、この年表がほぼ全てのイベントで実際に効果を持つよう設計した。
+ * それでも対象の勢力・州が存在しない、あるいは既に消滅しているイベントは
+ * 安全に no-op になる（例：現時点でスコットランド・オスマン帝国は未実装）。
  */
 
 export interface HistoricalEvent {
@@ -70,6 +71,14 @@ function ravageAllRegions(state: GameState, populationFactor: number, taxBaseFac
   return { ...state, regions };
 }
 
+function ravageFactionsRegions(state: GameState, factionIds: readonly FactionId[], populationFactor: number, taxBaseFactor: number): GameState {
+  return factionIds.reduce((s, id) => ravageFactionRegions(s, id, populationFactor, taxBaseFactor), state);
+}
+
+function adjustTreasuryForFactions(state: GameState, factionIds: readonly FactionId[], delta: number): GameState {
+  return factionIds.reduce((s, id) => adjustTreasury(s, id, delta), state);
+}
+
 /** 特定の勢力が領有する州だけを減衰させる（局地的な戦乱イベント用）。 */
 function ravageFactionRegions(state: GameState, factionId: FactionId, populationFactor: number, taxBaseFactor: number): GameState {
   const faction = state.factions[factionId];
@@ -85,6 +94,21 @@ function ravageFactionRegions(state: GameState, factionId: FactionId, population
     };
   }
   return { ...state, regions };
+}
+
+/** 2勢力間を戦争状態にする（双方が生存している場合のみ）。 */
+function declareWarBetween(state: GameState, a: FactionId, b: FactionId): GameState {
+  const factionA = state.factions[a];
+  const factionB = state.factions[b];
+  if (!factionA || !factionB || !factionA.alive || !factionB.alive) return state;
+  return {
+    ...state,
+    factions: {
+      ...state.factions,
+      [a]: { ...factionA, diplomacy: { ...factionA.diplomacy, [b]: "war" } },
+      [b]: { ...factionB, diplomacy: { ...factionB.diplomacy, [a]: "war" } },
+    },
+  };
 }
 
 /** 生存している lord 型勢力同士を総当たりで戦争状態にする（欧州規模の大戦イベント用）。 */
@@ -108,6 +132,34 @@ const HRE = asFactionId("faction_hre");
 const WEST_FRANCIA = asFactionId("faction_west_francia");
 const PAPAL = asFactionId("faction_papal");
 const BYZANTIUM = asFactionId("faction_byzantium");
+const ENGLAND = asFactionId("faction_england");
+const CASTILE = asFactionId("faction_castile");
+const ARAGON = asFactionId("faction_aragon");
+const ASTURIAS = asFactionId("faction_asturias");
+const AUSTRIA = asFactionId("faction_austria");
+
+/**
+ * 神聖ローマ帝国「本体」を構成する勢力群（設計書 15章）：選帝侯7家・バイエルン・
+ * シュヴァーベン・オーストリア・スペインの道の回廊4勢力。ポーランド・ハンガリー・
+ * イタリア諸国は「緩い同盟圏」ではあるが帝国そのものの構成員ではないため含めない。
+ * ドイツ農民戦争・三十年戦争など「帝国全域」を舞台とする史実イベントに使う。
+ */
+const HRE_CORE_FACTION_IDS: readonly FactionId[] = [
+  HRE,
+  asFactionId("faction_mainz"),
+  asFactionId("faction_trier"),
+  asFactionId("faction_cologne"),
+  asFactionId("faction_palatinate"),
+  asFactionId("faction_brandenburg"),
+  asFactionId("faction_bohemia"),
+  asFactionId("faction_bavaria"),
+  asFactionId("faction_swabia"),
+  AUSTRIA,
+  asFactionId("faction_franche_comte"),
+  asFactionId("faction_lorraine"),
+  asFactionId("faction_luxembourg"),
+  asFactionId("faction_flanders"),
+];
 
 export const HISTORICAL_EVENTS: readonly HistoricalEvent[] = [
   {
@@ -121,8 +173,17 @@ export const HISTORICAL_EVENTS: readonly HistoricalEvent[] = [
     id: "norman_conquest_1066",
     year: 1066,
     name: "ノルマン・コンクエスト",
-    description: "ノルマンディー公ウィリアムがイングランドを征服した。（本シナリオにイングランド勢力がないため、対応する勢力・州が存在する場合のみ効果を持つ）",
-    apply: (state) => state, // TODO: イングランド系勢力・州を追加した拡張シナリオで実装する
+    description:
+      "ノルマンディー公ウィリアムがイングランドを征服し、新王朝が成立した。旧王統の後継指定が" +
+      "リセットされ、征服に伴う混乱で国庫が目減りする。",
+    apply: (state) => {
+      const england = state.factions[ENGLAND];
+      if (!england || !england.alive) return state;
+      return {
+        ...state,
+        factions: { ...state.factions, [ENGLAND]: { ...england, heir: null, treasury: Math.round(england.treasury * 0.6) } },
+      };
+    },
   },
   {
     id: "investiture_controversy_1077",
@@ -150,8 +211,8 @@ export const HISTORICAL_EVENTS: readonly HistoricalEvent[] = [
     id: "magna_carta_1215",
     year: 1215,
     name: "マグナ・カルタ",
-    description: "イングランド王の権力に制約が課された。（本シナリオにイングランド勢力がないため no-op）",
-    apply: (state) => state,
+    description: "イングランド王の権力に諸侯・教会が制約を課し、王権の恣意的な課税が難しくなった。",
+    apply: (state) => adjustTreasury(state, ENGLAND, -400),
   },
   {
     id: "mongol_invasion_1241",
@@ -180,8 +241,8 @@ export const HISTORICAL_EVENTS: readonly HistoricalEvent[] = [
     id: "hundred_years_war_1337",
     year: 1337,
     name: "百年戦争",
-    description: "英仏間で長期の大戦争が始まった。（本シナリオにイングランド勢力がないため西フランクへの直接効果はなし）",
-    apply: (state) => state, // TODO: イングランド系勢力を追加した拡張シナリオで西フランクとの開戦を実装する
+    description: "イングランド王がフランス王位継承権を主張し、英仏間で長期の大戦争が始まった。",
+    apply: (state) => declareWarBetween(state, ENGLAND, WEST_FRANCIA),
   },
   {
     id: "black_death_1347",
@@ -213,15 +274,22 @@ export const HISTORICAL_EVENTS: readonly HistoricalEvent[] = [
     id: "wars_of_the_roses_1455",
     year: 1455,
     name: "バラ戦争",
-    description: "イングランドで王位継承をめぐる内乱が起きた。（本シナリオにイングランド勢力がないため no-op。継承システム(4章)と連動する想定）",
-    apply: (state) => state,
+    description: "イングランドで王位継承をめぐる内乱が起き、国内が疲弊した。",
+    apply: (state) => ravageFactionRegions(state, ENGLAND, 0.85, 0.8),
   },
   {
     id: "reconquista_1492",
     year: 1492,
     name: "レコンキスタ完了／新大陸到達",
-    description: "イベリア半島の再征服が完了し、新大陸への航路が開かれた。（本シナリオにイベリア勢力がないため no-op）",
-    apply: (state) => state,
+    description:
+      "イベリア半島の再征服が完了し（版図外勢力＝イスラム政権の圧力もこれ以降やむ）、" +
+      "新大陸への航路が開かれてカスティーリャ・アラゴンに新たな富がもたらされた。",
+    apply: (state) => {
+      let next = adjustTreasury(state, CASTILE, 800);
+      next = adjustTreasury(next, ARAGON, 400);
+      next = adjustTreasury(next, ASTURIAS, 200);
+      return next;
+    },
   },
   {
     id: "reformation_1517",
@@ -241,8 +309,8 @@ export const HISTORICAL_EVENTS: readonly HistoricalEvent[] = [
     id: "german_peasants_war_1524",
     year: 1524,
     name: "ドイツ農民戦争",
-    description: "神聖ローマ帝国領内で農民反乱が起き、諸州が動揺した。",
-    apply: (state) => ravageFactionRegions(state, HRE, 0.95, 0.9),
+    description: "神聖ローマ帝国領内の広範囲で農民反乱が起き、選帝侯・諸侯の諸州が動揺した。",
+    apply: (state) => ravageFactionsRegions(state, HRE_CORE_FACTION_IDS, 0.95, 0.9),
   },
   {
     id: "council_of_trent_1545",
@@ -262,29 +330,38 @@ export const HISTORICAL_EVENTS: readonly HistoricalEvent[] = [
     id: "thirty_years_war_1618",
     year: 1618,
     name: "三十年戦争",
-    description: "神聖ローマ帝国全域を巻き込む大規模戦争が始まった。",
-    apply: (state) => ravageFactionRegions(state, HRE, 0.75, 0.7),
+    description: "神聖ローマ帝国全域（選帝侯・諸侯・オーストリア・回廊諸国）を巻き込む大規模戦争が始まった。",
+    apply: (state) => ravageFactionsRegions(state, HRE_CORE_FACTION_IDS, 0.75, 0.7),
   },
   {
     id: "peace_of_westphalia_1648",
     year: 1648,
     name: "ウェストファリア条約",
-    description: "三十年戦争が終結し、神聖ローマ帝国はある程度の復興を見せた。",
-    apply: (state) => adjustTreasury(state, HRE, 500),
+    description: "三十年戦争が終結し、神聖ローマ帝国の諸侯はある程度の復興を見せた。",
+    apply: (state) => adjustTreasuryForFactions(state, HRE_CORE_FACTION_IDS, 250),
   },
   {
     id: "siege_of_vienna_1683",
     year: 1683,
     name: "第2次ウィーン包囲",
-    description: "オスマン帝国が欧州へ侵攻した。（本シナリオにオスマン勢力がないため no-op）",
-    apply: (state) => state,
+    description:
+      "オスマン帝国の大軍がウィーンを包囲した（版図外勢力の天災的圧力とは別に、確実に発生する" +
+      "史実の一大事件としてオーストリアに直接被害を与える）。",
+    apply: (state) => ravageFactionRegions(state, AUSTRIA, 0.85, 0.8),
   },
   {
     id: "war_of_spanish_succession_1701",
     year: 1701,
     name: "スペイン継承戦争",
-    description: "王朝の断絶に起因する国際戦争が起きた。（本シナリオにスペイン勢力がないため no-op。継承システム(4章)と連動する想定）",
-    apply: (state) => state,
+    description:
+      "王朝の断絶に起因する国際戦争が起きた。本シナリオではカスティーリャ・アラゴンが" +
+      "「スペイン」を代表する勢力として、この戦争の経済的な消耗を負う（継承システム(4章)とも" +
+      "連動しうる：この時点で両家が同君連合／内乱状態にあれば、その帰結が優先される）。",
+    apply: (state) => {
+      let next = ravageFactionRegions(state, CASTILE, 0.85, 0.8);
+      next = ravageFactionRegions(next, ARAGON, 0.9, 0.85);
+      return next;
+    },
   },
   {
     id: "french_revolution_1789",

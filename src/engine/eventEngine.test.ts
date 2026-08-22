@@ -8,6 +8,8 @@ import { validateGameState } from "../utils/validation.js";
 const HRE = asFactionId("faction_hre");
 const PAPAL = asFactionId("faction_papal");
 const BYZANTIUM = asFactionId("faction_byzantium");
+const ENGLAND = asFactionId("faction_england");
+const WEST_FRANCIA = asFactionId("faction_west_francia");
 
 function atYear(year: number) {
   return { ...createInitialGameState(), year };
@@ -59,11 +61,28 @@ describe("applyYearStartEvents", () => {
     expect(validateGameState(result.state).issues).toEqual([]);
   });
 
-  it("対応する勢力・州が存在しないイベント（例：マグナ・カルタ）は安全に無視される", () => {
+  it("マグナ・カルタ（1215年）はイングランドの国庫を減らす（27勢力シナリオでは実効果を持つ）", () => {
     const state = atYear(1215);
+    const before = state.factions[ENGLAND]!.treasury;
     const result = applyYearStartEvents(state);
     expect(result.appliedEvents.map((e) => e.id)).toContain("magna_carta_1215");
-    expect(result.state).toEqual(state); // 効果対象がないので状態は変化しない
+    expect(result.state.factions[ENGLAND]?.treasury).toBeLessThan(before);
+    expect(validateGameState(result.state).issues).toEqual([]);
+  });
+
+  it("百年戦争（1337年）はイングランドと西フランクを戦争状態にする", () => {
+    const state = atYear(1337);
+    const result = applyYearStartEvents(state);
+    expect(result.appliedEvents.map((e) => e.id)).toContain("hundred_years_war_1337");
+    expect(result.state.factions[ENGLAND]?.diplomacy[WEST_FRANCIA]).toBe("war");
+    expect(result.state.factions[WEST_FRANCIA]?.diplomacy[ENGLAND]).toBe("war");
+  });
+
+  it("対応する勢力・キャラクター生成の仕組みが存在しないイベント（例：ジャンヌ・ダルク登場）は安全に無視される", () => {
+    const state = atYear(1429);
+    const result = applyYearStartEvents(state);
+    expect(result.appliedEvents.map((e) => e.id)).toContain("joan_of_arc_1429");
+    expect(result.state).toEqual(state); // 効果対象（指揮官生成の仕組み）がないので状態は変化しない
   });
 
   it("events に空配列を渡すとイベントを無効化できる", () => {

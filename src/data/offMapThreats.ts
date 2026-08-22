@@ -95,4 +95,17 @@ export const OFF_MAP_THREATS: readonly OffMapThreatDefinition[] = [
     annualProbability: 0.08,
     severity: 0.8,
   },
+  {
+    id: "andalusi_frontier_raids",
+    name: "アンダルス（イスラム政権）による国境紛争",
+    description:
+      "後ウマイヤ朝・その崩壊後のタイファ諸国、のちのムラービト朝・ムワッヒド朝による、" +
+      "イベリア半島のキリスト教諸国（カスティーリャ・アラゴン等）国境への圧力・略奪遠征。" +
+      "レコンキスタの相手方をモンゴル・オスマンと同様に版図外勢力として扱う（設計書14章）。" +
+      "レコンキスタ完了（1492年）をもって終了する。",
+    startYear: 962,
+    endYear: 1492,
+    annualProbability: 0.1,
+    severity: 1.0,
+  },
 ];

@@ -1,6 +1,7 @@
 import { effectiveStrength, totalTroops, type Army } from "../models/army.js";
 import type { CasualtyReport } from "../models/battle.js";
 import { isAtWar, type DiplomaticStance } from "../models/faction.js";
+import { asArmyId } from "../models/ids.js";
 import type { FactionId, GameState, Policy, Region, RegionId, TurnPhase } from "../models/index.js";
 import type { DecisionContext, DecisionOption, RandomSource } from "./aiPolicy.js";
 import { decideByScoring, defaultRandomSource, scoreOption } from "./aiPolicy.js";
@@ -120,6 +121,84 @@ function applyBattleOutcome(
   else delete armies[updatedAttacker.id];
   if (totalTroops(updatedDefender) > 0) armies[updatedDefender.id] = updatedDefender;
   else delete armies[updatedDefender.id];
+
+  return { ...next, armies };
+}
+
+/**
+ * 州の駐留兵（`Region.garrison`）を、野戦軍が不在の州へ侵入してきた敵に対する
+ * 防衛力として一時的な Army 形へ変換する。`state.armies` には登録しない
+ * （駐留兵はArmyエンティティではなく州直属の防衛力という位置づけを保つため）。
+ */
+function phantomGarrisonArmy(region: Region): Army {
+  return {
+    id: asArmyId(`__garrison_${region.id}`),
+    faction: region.owner,
+    commander: null,
+    location: region.id,
+    units: [{ type: "infantry", count: region.garrison.count, training: region.garrison.training }],
+    doctrine: "default",
+    morale: 0.5,
+    supply: 1.0,
+  };
+}
+
+/**
+ * 野戦軍が守っていない州（領有勢力側の Army が既に不在／全滅済み）へ、敵対勢力の
+ * 軍が侵入した場合の戦闘解決。`applyBattleOutcome` と異なり、防御側は
+ * `phantomGarrisonArmy` で表現される駐留兵であり、Army エンティティとして
+ * 永続化しない（占領されなかった場合は `Region.garrison.count` を直接減らす）。
+ *
+ * 駐留兵は州に固定された防衛力であり、他州へ移動しうる野戦軍とは性質が異なるため、
+ * 「退却」判定（`retreatingSide === "defender"`）になった場合も駐留兵を隣接州へ
+ * 移動させることはせず、消耗のみを反映する（占領には至らない、という結果は保持する）。
+ */
+function resolveGarrisonDefense(
+  state: GameState,
+  input: BattleResolutionInput,
+  guards: CausalityGuardRegistry | undefined,
+): GameState {
+  const rawOutcome = resolveBattle(input);
+  const outcome = guards ? guards.apply(rawOutcome, { turn: state.turn }, input) : rawOutcome;
+
+  const attackerArmy = state.armies[outcome.attackerArmy];
+  const region = state.regions[outcome.region];
+  if (!attackerArmy || !region) return state;
+
+  let updatedAttacker = applyArmyCasualties(attackerArmy, outcome.attackerCasualties);
+  if (outcome.kind === "retreat" && outcome.retreatingSide === "attacker") {
+    const escapeRegionId = findEscapeRegion(outcome.attacker, region, state.regions);
+    if (escapeRegionId) updatedAttacker = { ...updatedAttacker, location: escapeRegionId };
+  }
+  const garrisonLoss = outcome.defenderCasualties.killed + outcome.defenderCasualties.captured;
+  const survivingGarrison = Math.max(0, region.garrison.count - garrisonLoss);
+
+  let regions = state.regions;
+  let factions = state.factions;
+
+  if (outcome.kind === "occupation" && outcome.newOwner && outcome.newOwner !== region.owner) {
+    const previousOwner = region.owner;
+    const newOwner = outcome.newOwner;
+    regions = { ...regions, [region.id]: { ...region, owner: newOwner, garrison: { count: 0, training: 0 } } };
+    const loserFaction = factions[previousOwner];
+    const winnerFaction = factions[newOwner];
+    factions = {
+      ...factions,
+      ...(loserFaction
+        ? { [previousOwner]: { ...loserFaction, regions: loserFaction.regions.filter((r) => r !== region.id) } }
+        : {}),
+      ...(winnerFaction ? { [newOwner]: { ...winnerFaction, regions: [...winnerFaction.regions, region.id] } } : {}),
+    };
+  } else {
+    regions = { ...regions, [region.id]: { ...region, garrison: { ...region.garrison, count: survivingGarrison } } };
+  }
+
+  let next: GameState = { ...state, regions, factions };
+  next = registerCapture(next, outcome); // 攻撃側指揮官が守備隊に敗れ捕縛される可能性のみ登録される
+
+  const armies = { ...next.armies };
+  if (totalTroops(updatedAttacker) > 0) armies[updatedAttacker.id] = updatedAttacker;
+  else delete armies[updatedAttacker.id];
 
   return { ...next, armies };
 }
@@ -726,6 +805,36 @@ function runBattleResolution(state: GameState, options: TurnEngineOptions): Game
       };
 
       next = applyBattleOutcome(next, input, guards);
+    }
+
+    // 野戦軍同士の遭遇戦が尽きたあとも、なお敵対勢力の軍がこの州に留まっている場合
+    // （＝領有勢力側の野戦軍が不在／全滅済み）、州直属の駐留兵を防衛力として戦わせる。
+    // これが無いと、駐留兵しかいない州へ野戦軍を進めるだけで無血占領できてしまう
+    // （3.1章の Region.garrison を実際の防衛力として扱っていなかった実装漏れの補正）。
+    for (let encounter = 0; encounter < MAX_ENCOUNTERS_PER_REGION; encounter++) {
+      const region = next.regions[regionId];
+      if (!region || region.garrison.count <= 0) break;
+
+      const intruder = Object.values(next.armies).find(
+        (a) => a.location === regionId && a.faction !== region.owner && next.factions[region.owner]?.diplomacy[a.faction] === "war",
+      );
+      if (!intruder) break;
+
+      const input: BattleResolutionInput = {
+        turn: next.turn,
+        region,
+        regionsById: next.regions,
+        attackerFaction: intruder.faction,
+        defenderFaction: region.owner,
+        attackerArmy: intruder,
+        defenderArmy: phantomGarrisonArmy(region),
+        attackerCommander: intruder.commander ? (next.characters[intruder.commander] ?? null) : null,
+        defenderCommander: null,
+        surpriseAttacker: detectSurprise(intruder.faction, region, next),
+        flankingAttacker: detectFlanking(intruder.faction, intruder.id, region, next),
+      };
+
+      next = resolveGarrisonDefense(next, input, guards);
     }
   }
 
