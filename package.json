@@ -1,0 +1,17 @@
+{
+  "name": "europe_962",
+  "version": "0.1.0",
+  "private": true,
+  "description": "会議は踊る、されど進まず - 欧州歴史シミュレーション データモデル",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}
