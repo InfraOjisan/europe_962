@@ -96,6 +96,7 @@ describe("registerCapture", () => {
       attackerCasualties: { killed: 0, captured: 0, moraleAfter: 0 },
       defenderCasualties: { killed: 0, captured: 0, moraleAfter: 0 },
       newOwner: null,
+      retreatingSide: null,
       capturedCommander: commander,
       turn: 5,
       ...over,

@@ -39,6 +39,11 @@ export interface BattleOutcome {
    */
   readonly newOwner: FactionId | null;
   /**
+   * kind === "retreat" の場合のみ設定される、退却した側（"attacker" | "defender"）。
+   * TurnEngine が実際に軍を隣接州へ移動させる際に参照する。それ以外は null。
+   */
+  readonly retreatingSide: "attacker" | "defender" | null;
+  /**
    * kind === "surrender" で、降伏した側に同行していた指揮官が退路なく捕縛された場合に
    * その CharacterId を設定する（設計書 5.1）。指揮官不在、または捕縛が発生しない場合は null。
    * 呼び出し側（ターン処理）がこれを見て `captivities` にエントリを作成する。

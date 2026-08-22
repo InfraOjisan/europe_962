@@ -206,6 +206,39 @@ export function collapseFaction(state: GameState, factionId: FactionId): GameSta
 }
 
 /**
+ * 平和的併合／同君連合：跡継ぎの絶えた勢力の州・軍団を、唯一の有力claimantが率いる勢力に
+ * 編入する。捕虜・人質による併合強制（`captivity.ts` の forceAnnexation）と処理内容は
+ * 似ているが、こちらは相続の帰結として発生する点が異なる（前提条件のチェックは行わない）。
+ */
+export function applyPersonalUnion(state: GameState, dissolvedFactionId: FactionId, absorbingFactionId: FactionId): GameState {
+  const dissolved = state.factions[dissolvedFactionId];
+  const absorbing = state.factions[absorbingFactionId];
+  if (!dissolved || !absorbing) return state;
+
+  const updatedRegions: Record<string, Region> = {};
+  for (const regionId of dissolved.regions) {
+    const region = state.regions[regionId];
+    if (region) updatedRegions[regionId] = { ...region, owner: absorbingFactionId };
+  }
+
+  const updatedArmies: Record<string, Army> = { ...state.armies };
+  for (const army of Object.values(state.armies)) {
+    if (army.faction === dissolvedFactionId) updatedArmies[army.id] = { ...army, faction: absorbingFactionId };
+  }
+
+  return {
+    ...state,
+    regions: { ...state.regions, ...updatedRegions },
+    armies: updatedArmies,
+    factions: {
+      ...state.factions,
+      [absorbingFactionId]: { ...absorbing, regions: [...absorbing.regions, ...dissolved.regions] },
+      [dissolvedFactionId]: { ...dissolved, alive: false, ruler: null, heir: null, regions: [] },
+    },
+  };
+}
+
+/**
  * 内乱：旧勢力の州を claimant ごとにラウンドロビンで分割し、claimant を当主とする
  * 分派勢力（claimant faction）を生成する。軍団はその時点の所在州の新しい領有者に合わせて
  * 所属を付け替える。最終的な決着（全州の再統一）は3章の戦闘解決エンジンに委ねる。
@@ -269,4 +302,32 @@ export function spawnCivilWarFactions(state: GameState, originalFactionId: Facti
     regions: { ...state.regions, ...updatedRegions },
     armies: { ...state.armies, ...updatedArmies },
   };
+}
+
+/**
+ * 君主死亡の一連の処理（`resolveSuccession` の結果を実際に GameState へ適用する）。
+ * TurnEngine の年始フェイズから呼ばれる想定のエントリーポイント。
+ */
+export function applySuccession(state: GameState, deceasedRulerId: CharacterId, factionId: FactionId): GameState {
+  const result = resolveSuccession(state, deceasedRulerId, factionId);
+
+  switch (result.kind) {
+    case "peaceful":
+    case "auto_pick": {
+      const faction = state.factions[factionId];
+      const newRuler = result.newRuler ? state.characters[result.newRuler] : undefined;
+      if (!faction || !newRuler) return state;
+      return {
+        ...state,
+        characters: { ...state.characters, [newRuler.id]: { ...newRuler, role: "ruler" } },
+        factions: { ...state.factions, [factionId]: { ...faction, ruler: newRuler.id, heir: null } },
+      };
+    }
+    case "personal_union":
+      return applyPersonalUnion(state, factionId, result.absorbingFaction!);
+    case "civil_war":
+      return spawnCivilWarFactions(state, factionId, result.claimants);
+    case "collapse":
+      return collapseFaction(state, factionId);
+  }
 }
