@@ -27,6 +27,7 @@ const regionSaxony: Region = {
   terrainModifier: { attack: 1.0, defense: 1.0 },
   population: 300_000,
   taxBase: 900,
+  archetype: "continental",
   garrison: { count: 2000, training: 0.6 },
   adjacency: [asRegionId("region_bavaria"), asRegionId("region_francia")],
   fortified: false,
@@ -41,6 +42,7 @@ const regionBavaria: Region = {
   terrainModifier: { attack: 0.95, defense: 1.1 },
   population: 250_000,
   taxBase: 750,
+  archetype: "continental",
   garrison: { count: 1800, training: 0.6 },
   adjacency: [asRegionId("region_saxony"), asRegionId("region_swabia")],
   fortified: false,
@@ -55,6 +57,7 @@ const regionSwabia: Region = {
   terrainModifier: { attack: 0.95, defense: 1.1 },
   population: 220_000,
   taxBase: 700,
+  archetype: "alpine", // アルプス山系に近く、後年のスイス傭兵供給地の原型として扱う
   garrison: { count: 1500, training: 0.55 },
   adjacency: [asRegionId("region_bavaria"), asRegionId("region_burgundy"), asRegionId("region_papal_states")],
   fortified: true,
@@ -69,6 +72,7 @@ const regionFrancia: Region = {
   terrainModifier: { attack: 1.0, defense: 1.0 },
   population: 280_000,
   taxBase: 850,
+  archetype: "continental",
   garrison: { count: 1900, training: 0.55 },
   adjacency: [asRegionId("region_saxony"), asRegionId("region_burgundy")],
   fortified: false,
@@ -83,6 +87,7 @@ const regionBurgundy: Region = {
   terrainModifier: { attack: 1.0, defense: 1.0 },
   population: 180_000,
   taxBase: 600,
+  archetype: "continental",
   garrison: { count: 1200, training: 0.5 },
   adjacency: [asRegionId("region_francia"), asRegionId("region_swabia")],
   fortified: false,
@@ -97,6 +102,7 @@ const regionPapalStates: Region = {
   terrainModifier: { attack: 0.85, defense: 1.25 },
   population: 150_000,
   taxBase: 650,
+  archetype: "mediterranean",
   garrison: { count: 900, training: 0.45 },
   adjacency: [asRegionId("region_swabia"), asRegionId("region_byzantium")],
   fortified: true,
@@ -111,6 +117,7 @@ const regionByzantium: Region = {
   terrainModifier: { attack: 1.0, defense: 1.05 },
   population: 260_000,
   taxBase: 1000,
+  archetype: "mediterranean",
   garrison: { count: 2200, training: 0.7 },
   adjacency: [asRegionId("region_papal_states")],
   fortified: false,
@@ -141,6 +148,7 @@ const charOtto1: Character = {
   traits: ["infantry_specialist"],
   age: 50,
   alive: true,
+  policy: "expansionism", // 史実: 東方遠征・レヒフェルトの戦い等を通じ帝国を拡大・統合した
   spouse: asCharacterId("char_adelaide"),
   children: [],
   ...NO_LINEAGE,
@@ -155,6 +163,7 @@ const charAdelaide: Character = {
   traits: [],
   age: 30,
   alive: true,
+  policy: "self_preservation", // 史実の記録が乏しいため既定の1つを割り当て（家名の存続を重視）
   spouse: asCharacterId("char_otto1"),
   children: [],
   ...NO_LINEAGE,
@@ -169,6 +178,7 @@ const charHermann: Character = {
   traits: ["administrator"],
   age: 45,
   alive: true,
+  policy: "self_interest", // 記録の乏しい人物への既定割り当て（財と地位の拡大を志向）
   spouse: null,
   children: [],
   ...NO_LINEAGE,
@@ -183,6 +193,7 @@ const charBurchard: Character = {
   traits: ["infantry_specialist"],
   age: 38,
   alive: true,
+  policy: "expansionism", // 戦闘隊長として軍事的拡大を志向する既定割り当て
   spouse: null,
   children: [],
   ...NO_LINEAGE,
@@ -197,6 +208,7 @@ const charLothair: Character = {
   traits: [],
   age: 22,
   alive: true,
+  policy: "self_preservation", // 設定上、若く求心力を欠く宮廷を生き延びさせることを優先する君主
   spouse: null,
   children: [],
   ...NO_LINEAGE,
@@ -211,6 +223,7 @@ const charGuyDeVermandois: Character = {
   traits: ["cavalry_specialist"],
   age: 33,
   alive: true,
+  policy: "self_interest", // 記録の乏しい封建領主への既定割り当て（自らの所領・利得を優先）
   spouse: null,
   children: [],
   ...NO_LINEAGE,
@@ -225,6 +238,7 @@ const charJohn12: Character = {
   traits: ["diplomat"],
   age: 26,
   alive: true,
+  policy: "self_interest", // 史実: 蓄財・縁故人事など私利で悪名高い教皇として知られる
   spouse: null,
   children: [],
   ...NO_LINEAGE,
@@ -239,6 +253,7 @@ const charNikephoros: Character = {
   traits: ["siege_specialist", "infantry_specialist"],
   age: 47,
   alive: true,
+  policy: "expansionism", // 史実: 「陸の皇帝」と称された征服将軍としての性格を反映
   spouse: null,
   children: [],
   ...NO_LINEAGE,
@@ -253,6 +268,7 @@ const charCondottiere: Character = {
   traits: ["cavalry_specialist"],
   age: 40,
   alive: true,
+  policy: "self_interest", // 傭兵の典型：金銭・報奨を最優先する（gamesystem_europe.md の傭兵観に対応）
   spouse: null,
   children: [],
   ...NO_LINEAGE,

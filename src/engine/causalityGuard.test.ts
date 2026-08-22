@@ -13,6 +13,7 @@ const region: Region = {
   terrainModifier: { attack: 1.0, defense: 1.0 },
   population: 100_000,
   taxBase: 500,
+  archetype: "continental",
   garrison: { count: 0, training: 0 },
   adjacency: [],
   fortified: false,

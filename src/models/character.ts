@@ -1,4 +1,5 @@
 import type { CharacterId, FactionId } from "./ids.js";
+import type { Policy } from "./policy.js";
 
 /**
  * ゲーム内での人物の役割。
@@ -61,4 +62,10 @@ export interface Character {
   readonly adoptedChildren: readonly CharacterId[];
   /** 自分が養子である場合の養親。実親ではない。 */
   readonly adoptedBy: CharacterId | null;
+
+  /**
+   * 行動方針（設計書 9章）。史実で行動原理が明確な人物は個別に指定し、
+   * それ以外は生成時に4種から一様乱数で割り当てる（`aiPolicy.ts` の `assignRandomPolicy`）。
+   */
+  readonly policy: Policy;
 }

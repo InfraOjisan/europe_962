@@ -1,4 +1,5 @@
 import type { ArmyId, FactionId, RegionId } from "./ids.js";
+import type { RegionArchetype } from "./regionArchetype.js";
 
 /** 地形種別。戦闘補正・移動補正のキーになる。 */
 export type TerrainType = "plain" | "hill" | "mountain" | "forest" | "coast";
@@ -33,6 +34,8 @@ export interface Region {
   readonly terrainModifier: TerrainModifier;
   readonly population: number;
   readonly taxBase: number;
+  /** 地勢アーキタイプ（設計書 10章）。政権安定期の基準税率・傭兵供給などに影響する。 */
+  readonly archetype: RegionArchetype;
   readonly garrison: Garrison;
   /** 隣接州。対称関係であること（validation で検証する）。 */
   readonly adjacency: readonly RegionId[];

@@ -18,6 +18,7 @@ function buildFamily(): Record<string, Character> {
     traits: [],
     age: 0,
     alive: true,
+    policy: "self_preservation",
     spouse: null,
     children: [],
     parents: [],
