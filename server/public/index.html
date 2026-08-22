@@ -53,9 +53,17 @@
 </div>
 
 <div class="body-row">
-  <div class="panel regions-panel">
-    <div class="panel-title">州（Region）</div>
-    <div id="regions" class="region-grid"></div>
+  <div class="panel map-panel">
+    <div class="panel-title">
+      欧州地図
+      <span class="map-legend">
+        <span class="legend-item"><span class="legend-swatch frontier-swatch"></span>辺境州</span>
+        <span class="legend-item"><span class="legend-swatch fortified-swatch"></span>城塞</span>
+        <span class="legend-item"><span class="legend-line spanish-road-swatch"></span>スペインの道</span>
+      </span>
+    </div>
+    <div id="map-container" class="map-container"></div>
+    <div id="region-detail" class="region-detail">州（ノード）をクリックすると詳細を表示します。</div>
   </div>
 
   <div class="panel factions-panel">
@@ -72,6 +80,6 @@
   </div>
 </div>
 
-<script src="./app.js"></script>
+<script type="module" src="./app.js"></script>
 </body>
 </html>

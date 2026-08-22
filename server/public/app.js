@@ -1,3 +1,5 @@
+import { MAP_LAYOUT, MAP_VIEWBOX, SEA_PATCHES, SPANISH_ROAD } from "./mapLayout.js";
+
 const FACTION_COLORS = ["#a97729", "#5b7ea3", "#8a3b3b", "#6d5590", "#4d7c3f", "#b7862f", "#3f6b7c", "#7c3f6b"];
 const factionColor = new Map();
 function colorFor(factionId) {
@@ -13,7 +15,8 @@ const els = {
   phase: document.getElementById("phase"),
   warPct: document.getElementById("war-pct"),
   warFill: document.getElementById("war-fill"),
-  regions: document.getElementById("regions"),
+  mapContainer: document.getElementById("map-container"),
+  regionDetail: document.getElementById("region-detail"),
   factions: document.getElementById("factions"),
   armies: document.getElementById("armies"),
   log: document.getElementById("log"),
@@ -32,6 +35,7 @@ const els = {
 let factionNameOf = new Map();
 let hasShownInitialPicker = false;
 let currentState = null;
+let selectedRegionId = null;
 const logHistory = []; // { year, lines: string[] }
 
 function render(state) {
@@ -123,27 +127,102 @@ function phaseLabel(phase) {
   }[phase] ?? phase;
 }
 
+/**
+ * 欧州地図（設計書 15章）：都市（州）をノード、隣接関係を線で結んだ模式図。
+ * design/ui-mockup/ の州ポリゴン地図と異なり、27州すべてを見渡せるよう
+ * ノード＋隣接線のネットワーク図として再構成した（ユーザー要望：
+ * 「ヨーロッパの地図を背景に都市を線で結んでください」）。
+ */
 function renderRegions(state) {
-  els.regions.innerHTML = "";
+  const byId = new Map(state.regions.map((r) => [r.id, r]));
+
+  const seaPatches = SEA_PATCHES.map(
+    (p) => `<ellipse class="sea-patch" cx="${p.cx}" cy="${p.cy}" rx="${p.rx}" ry="${p.ry}"><title>${escapeHtml(p.label)}</title></ellipse>`,
+  ).join("");
+
+  const adjacencyLines = [];
+  const seen = new Set();
   for (const r of state.regions) {
-    const card = document.createElement("div");
-    card.className = "region-card";
-    card.style.borderColor = colorFor(r.owner);
-    const flags = [];
-    if (r.frontier) flags.push('<span class="flag frontier">辺境</span>');
-    if (r.fortified) flags.push('<span class="flag fortified">城塞</span>');
-    if (r.siege) flags.push('<span class="flag siege">包囲中</span>');
-    card.innerHTML = `
-      <div class="r-name">${escapeHtml(r.name)}</div>
-      <div class="r-owner" style="background:${colorFor(r.owner)}">${escapeHtml(factionNameOf.get(r.owner) ?? r.owner)}</div>
-      <div class="r-meta">
-        人口 ${r.population.toLocaleString()} ／ 税基盤 ${r.taxBase.toLocaleString()}<br>
-        地勢: ${r.archetype}
-      </div>
-      <div class="r-flags">${flags.join("")}</div>
-    `;
-    els.regions.appendChild(card);
+    const from = MAP_LAYOUT[r.id];
+    if (!from) continue;
+    for (const neighborId of r.adjacency) {
+      const key = [r.id, neighborId].sort().join("|");
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const to = MAP_LAYOUT[neighborId];
+      if (!to) continue;
+      adjacencyLines.push(`<line class="adjacency-line" x1="${from.x}" y1="${from.y}" x2="${to.x}" y2="${to.y}" />`);
+    }
   }
+
+  const spanishRoadPoints = SPANISH_ROAD.map((id) => MAP_LAYOUT[id]).filter(Boolean).map((p) => `${p.x},${p.y}`).join(" ");
+
+  const nodes = state.regions
+    .map((r) => {
+      const pos = MAP_LAYOUT[r.id];
+      if (!pos) return "";
+      const isPlayerOwned = r.owner === state.playerFactionId;
+      const isSelected = r.id === selectedRegionId;
+      const classes = ["region-node", r.frontier ? "is-frontier" : "", r.fortified ? "is-fortified" : "", r.siege ? "is-siege" : "", isPlayerOwned ? "is-player-owned" : "", isSelected ? "is-selected" : ""]
+        .filter(Boolean)
+        .join(" ");
+      return `
+        <g class="${classes}" data-region-id="${r.id}" transform="translate(${pos.x},${pos.y})">
+          <title>${escapeHtml(r.name)}（${escapeHtml(factionNameOf.get(r.owner) ?? r.owner)}）</title>
+          <circle class="region-node-halo" r="16"></circle>
+          <circle class="region-node-dot" r="10" fill="${colorFor(r.owner)}"></circle>
+          <text class="region-node-label" x="0" y="24" text-anchor="middle">${escapeHtml(shortLabel(r.name))}</text>
+        </g>
+      `;
+    })
+    .join("");
+
+  els.mapContainer.innerHTML = `
+    <svg viewBox="${MAP_VIEWBOX}" class="europe-map" preserveAspectRatio="xMidYMid meet">
+      <rect class="map-bg" x="0" y="0" width="1500" height="1050" rx="10"></rect>
+      ${seaPatches}
+      <g class="adjacency-lines">${adjacencyLines.join("")}</g>
+      <polyline class="spanish-road-line" points="${spanishRoadPoints}"></polyline>
+      <g class="region-nodes">${nodes}</g>
+    </svg>
+  `;
+
+  const svg = els.mapContainer.querySelector("svg");
+  svg.addEventListener("click", (e) => {
+    const nodeEl = e.target.closest("[data-region-id]");
+    if (!nodeEl) return;
+    selectedRegionId = nodeEl.getAttribute("data-region-id");
+    renderRegionDetail(byId.get(selectedRegionId));
+    // 選択状態のハイライトだけ即時反映（全体再描画は次のrenderまで待たない）
+    svg.querySelectorAll(".region-node.is-selected").forEach((el) => el.classList.remove("is-selected"));
+    nodeEl.classList.add("is-selected");
+  });
+
+  if (selectedRegionId && byId.has(selectedRegionId)) renderRegionDetail(byId.get(selectedRegionId));
+}
+
+/** 地図上のラベル用に、長い州名から括弧書き等を削った短縮表記を作る。 */
+function shortLabel(name) {
+  return name.replace(/[（(].*?[）)]/g, "").trim();
+}
+
+function renderRegionDetail(region) {
+  if (!region) {
+    els.regionDetail.textContent = "州（ノード）をクリックすると詳細を表示します。";
+    return;
+  }
+  const flags = [];
+  if (region.frontier) flags.push('<span class="flag frontier">辺境（版図外勢力の侵寇対象）</span>');
+  if (region.fortified) flags.push('<span class="flag fortified">城塞</span>');
+  if (region.siege) flags.push('<span class="flag siege">包囲中</span>');
+  els.regionDetail.innerHTML = `
+    <div class="rd-name">${escapeHtml(region.name)}</div>
+    <div class="rd-owner" style="background:${colorFor(region.owner)}">${escapeHtml(factionNameOf.get(region.owner) ?? region.owner)}</div>
+    <div class="rd-meta">
+      人口 ${region.population.toLocaleString()} ／ 税基盤 ${region.taxBase.toLocaleString()} ／ 地勢: ${region.archetype}
+    </div>
+    <div class="rd-flags">${flags.join("") || '<span class="log-empty">特記事項なし</span>'}</div>
+  `;
 }
 
 function renderFactions(state) {

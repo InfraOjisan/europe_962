@@ -686,3 +686,64 @@ describe("advanceYearAsync（生成AI丸投げ版、設計書 13.1）", () => {
     expect(validateGameState(next).issues).toEqual([]);
   });
 });
+
+describe("州直属の駐留兵による防衛（設計書 3.1、Region.garrison）", () => {
+  // 野戦軍が不在の州へ敵対勢力の軍が侵入した場合、駐留兵が防衛力として機能しなければ
+  // 無血占領できてしまう（27勢力への拡張時に見つかった実装漏れの回帰テスト）。
+  const attackerId = asFactionId("faction_attacker");
+  const defenderId = asFactionId("faction_defender");
+  const homeId = asRegionId("r_defender_home");
+
+  function buildState(garrisonCount: number, garrisonTraining: number): GameState {
+    const defenderRegion = makeRegion({
+      id: homeId,
+      owner: defenderId,
+      adjacency: [],
+      garrison: { count: garrisonCount, training: garrisonTraining },
+    });
+    const attackerFaction = makeFaction({ id: attackerId, name: "攻め手", ruler: null, diplomacy: { [defenderId]: "war" } });
+    const defenderFaction = makeFaction({ id: defenderId, name: "受け手", ruler: null, regions: [homeId], diplomacy: { [attackerId]: "war" } });
+    const attackerArmy: Army = {
+      id: asArmyId("army_attacker"),
+      faction: attackerId,
+      commander: null,
+      location: homeId, // 既に侵入済みの状態からスタートする（行動フェイズの移動は別のテストで検証済み）
+      units: [{ type: "infantry", count: 5000, training: 0.8 }],
+      doctrine: "default",
+      morale: 0.9,
+      supply: 1.0,
+    };
+
+    return {
+      turn: 1,
+      year: 1000,
+      phase: "battle_resolution",
+      regions: { [homeId]: defenderRegion },
+      factions: { [attackerId]: attackerFaction, [defenderId]: defenderFaction },
+      armies: { [attackerArmy.id]: attackerArmy },
+      characters: {},
+      captivities: {},
+      greatWarTriggered: false,
+      playerFactionId: null,
+      spectator: null,
+    };
+  }
+
+  it("野戦軍が不在でも、駐留兵が弱ければ占領される（無血占領にはならない）", () => {
+    const state = buildState(50, 0.2); // 圧倒的に弱い駐留兵
+    const next = runPhase(state); // battle_resolution
+
+    expect(next.regions[homeId]?.owner).toBe(attackerId);
+    expect(next.factions[defenderId]?.regions).not.toContain(homeId);
+    expect(next.factions[attackerId]?.regions).toContain(homeId);
+    expect(validateGameState(next).issues).toEqual([]);
+  });
+
+  it("駐留兵が十分強ければ、侵入した軍を撃退できる（占領を防げる）", () => {
+    const state = buildState(25_000, 0.85); // 攻撃側より圧倒的に強い駐留兵
+    const next = runPhase(state); // battle_resolution
+
+    expect(next.regions[homeId]?.owner).toBe(defenderId); // 占領されない
+    expect(validateGameState(next).issues).toEqual([]);
+  });
+});
