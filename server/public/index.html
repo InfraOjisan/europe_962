@@ -16,6 +16,11 @@
     </div>
   </div>
   <div class="spacer"></div>
+  <div class="player-indicator" id="player-indicator">
+    <span class="player-indicator-label">操作勢力:</span>
+    <span id="player-indicator-name">観戦のみ（CPU完全おまかせ）</span>
+    <button class="btn btn-outline btn-sm" id="change-faction-btn">変更</button>
+  </div>
   <div class="war-gauge">
     <div class="war-gauge-label"><span>大戦への近さ</span><span id="war-pct">0%</span></div>
     <div class="war-gauge-track"><div class="war-gauge-fill" id="war-fill"></div></div>
@@ -29,6 +34,23 @@
 </div>
 
 <div id="gameover-banner" class="gameover-banner hidden"></div>
+<div id="player-frozen-note" class="frozen-note hidden"></div>
+
+<div class="modal-overlay hidden" id="faction-picker-overlay">
+  <div class="modal">
+    <div class="modal-title">操作する勢力を選んでください</div>
+    <div class="modal-desc">
+      選んだ勢力はCPU（AI）の自動判断から外れます。ただし現時点ではプレイヤー専用の
+      外交・軍事コマンド（宣戦布告・軍団移動など）はまだ実装されていないため、
+      明示的に何かを指示しない限りその勢力は動きません（他の勢力はこれまでどおりAIが動かします）。
+      「次の年へ」で世界がどう動くかを見るだけなら、観戦モードのままでも問題ありません。
+    </div>
+    <div id="faction-picker-list" class="faction-picker-list"></div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" id="picker-observe-btn">観戦のみで進める（CPU完全おまかせ）</button>
+    </div>
+  </div>
+</div>
 
 <div class="body-row">
   <div class="panel regions-panel">

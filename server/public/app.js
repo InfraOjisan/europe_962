@@ -18,15 +18,24 @@ const els = {
   armies: document.getElementById("armies"),
   log: document.getElementById("log"),
   banner: document.getElementById("gameover-banner"),
+  frozenNote: document.getElementById("player-frozen-note"),
   advanceBtn: document.getElementById("advance-btn"),
   resetBtn: document.getElementById("reset-btn"),
   useAi: document.getElementById("use-ai"),
+  playerIndicatorName: document.getElementById("player-indicator-name"),
+  changeFactionBtn: document.getElementById("change-faction-btn"),
+  pickerOverlay: document.getElementById("faction-picker-overlay"),
+  pickerList: document.getElementById("faction-picker-list"),
+  pickerObserveBtn: document.getElementById("picker-observe-btn"),
 };
 
 let factionNameOf = new Map();
+let hasShownInitialPicker = false;
+let currentState = null;
 const logHistory = []; // { year, lines: string[] }
 
 function render(state) {
+  currentState = state;
   els.year.textContent = state.year;
   els.turn.textContent = state.turn;
   els.phase.textContent = phaseLabel(state.phase);
@@ -46,6 +55,62 @@ function render(state) {
   renderFactions(state);
   renderArmies(state);
   renderBanner(state);
+  renderPlayerIndicator(state);
+}
+
+function renderPlayerIndicator(state) {
+  if (state.playerFactionId) {
+    const name = factionNameOf.get(state.playerFactionId) ?? state.playerFactionId;
+    els.playerIndicatorName.textContent = name;
+    els.frozenNote.textContent =
+      `「${name}」を操作中です。※現時点ではプレイヤー専用の外交・軍事コマンドは未実装のため、` +
+      "指示を出さない限りこの勢力は動きません（他の勢力はAIが動かします）。「次の年へ」で世界の推移だけ見ることはできます。";
+    els.frozenNote.classList.remove("hidden");
+  } else {
+    els.playerIndicatorName.textContent = "観戦のみ（CPU完全おまかせ）";
+    els.frozenNote.classList.add("hidden");
+  }
+}
+
+function openFactionPicker(state) {
+  els.pickerList.innerHTML = "";
+  const lordFactions = state.factions.filter((f) => f.type === "lord" && f.alive);
+  for (const f of lordFactions) {
+    const item = document.createElement("div");
+    item.className = "faction-picker-item";
+    item.innerHTML = `
+      <div>
+        <div class="fp-name"><span style="color:${colorFor(f.id)}">●</span> ${escapeHtml(f.name)}</div>
+        <div class="fp-meta">州 ${f.regions.length} ／ 国庫 ${f.treasury.toLocaleString()}${f.atWar ? " ／ 戦争中" : ""}</div>
+      </div>
+    `;
+    const selectBtn = document.createElement("button");
+    selectBtn.className = "btn btn-primary btn-sm";
+    selectBtn.textContent = "この勢力を選ぶ";
+    selectBtn.addEventListener("click", () => selectFaction(f.id));
+    item.appendChild(selectBtn);
+    els.pickerList.appendChild(item);
+  }
+  els.pickerOverlay.classList.remove("hidden");
+}
+
+function closeFactionPicker() {
+  els.pickerOverlay.classList.add("hidden");
+}
+
+async function selectFaction(factionId) {
+  const res = await fetch("/api/select-faction", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ factionId }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    alert(`エラー: ${err.error ?? res.statusText}`);
+    return;
+  }
+  closeFactionPicker();
+  render(await res.json());
 }
 
 function phaseLabel(phase) {
@@ -84,12 +149,14 @@ function renderRegions(state) {
 function renderFactions(state) {
   els.factions.innerHTML = "";
   for (const f of state.factions) {
+    const isPlayer = f.id === state.playerFactionId;
     const card = document.createElement("div");
-    card.className = "faction-card" + (f.alive ? "" : " dead");
+    card.className = "faction-card" + (f.alive ? "" : " dead") + (isPlayer ? " is-player" : "");
     const warBadge = f.atWar ? '<span class="war-badge">戦争中</span>' : "";
+    const playerBadge = isPlayer ? '<span class="your-faction-badge">操作中</span>' : "";
     const suzerain = f.suzerain ? `／ 宗主: ${escapeHtml(factionNameOf.get(f.suzerain) ?? f.suzerain)}` : "";
     card.innerHTML = `
-      <div class="f-name"><span style="color:${colorFor(f.id)}">●</span> ${escapeHtml(f.name)} ${warBadge}</div>
+      <div class="f-name"><span style="color:${colorFor(f.id)}">●</span> ${escapeHtml(f.name)} ${warBadge}${playerBadge}</div>
       <div class="f-meta">${f.type === "lord" ? "領主" : "傭兵団"} ／ 州 ${f.regions.length} ／ 国庫 ${f.treasury.toLocaleString()}${suzerain}</div>
     `;
     els.factions.appendChild(card);
@@ -158,7 +225,12 @@ function escapeHtml(s) {
 
 async function fetchState() {
   const res = await fetch("/api/state");
-  render(await res.json());
+  const state = await res.json();
+  render(state);
+  if (!hasShownInitialPicker) {
+    hasShownInitialPicker = true;
+    if (!state.playerFactionId) openFactionPicker(state);
+  }
 }
 
 async function advanceYear() {
@@ -189,12 +261,19 @@ async function resetGame() {
   if (!confirm("962年の初期状態にリセットします。よろしいですか？")) return;
   const res = await fetch("/api/reset", { method: "POST" });
   logHistory.length = 0;
-  render(await res.json());
+  const state = await res.json();
+  render(state);
   renderLog();
+  openFactionPicker(state); // リセット＝新しいゲームの開始として、勢力選択を再度促す
 }
 
 els.advanceBtn.addEventListener("click", advanceYear);
 els.resetBtn.addEventListener("click", resetGame);
+els.changeFactionBtn.addEventListener("click", () => currentState && openFactionPicker(currentState));
+els.pickerObserveBtn.addEventListener("click", () => selectFaction(null));
+els.pickerOverlay.addEventListener("click", (e) => {
+  if (e.target === els.pickerOverlay) closeFactionPicker(); // 背景クリックで閉じる（観戦のまま）
+});
 
 renderLog();
 fetchState();
