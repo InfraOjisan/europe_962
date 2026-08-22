@@ -1,0 +1,24 @@
+{
+  "name": "europe_962",
+  "version": "0.1.0",
+  "private": true,
+  "description": "会議は踊る、されど進まず - 欧州歴史シミュレーション データモデル",
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "serve": "node server/index.mjs",
+    "poc": "npm run build && npm run serve"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  },
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1"
+  }
+}

@@ -1,0 +1,136 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  a { color: #7c5a1e; }
+  a:hover { color: #a97729; }
+  .root { width: 1440px; height: 900px; position: relative; overflow: hidden; background: #ece0c4;
+    font-family: "EB Garamond", Georgia, serif; color: #3a2a1a; }
+  .display { font-family: "Cinzel", "Georgia", serif; letter-spacing: 0.02em; }
+
+  .backdrop { position: absolute; inset: 0; filter: grayscale(0.5) brightness(0.75); }
+  .backdrop svg { width: 100%; height: 100%; display: block; }
+  .dim { position: absolute; inset: 0; background: rgba(35,24,12,0.55); }
+
+  .modal { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 640px; max-height: 760px; background: #f4ead2; border: 2px solid #8a6a3f; border-radius: 14px;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.45); display: flex; flex-direction: column; overflow: hidden; }
+  .modal-head { padding: 22px 26px 16px; border-bottom: 2px solid #c3ac7c; display: flex; align-items: center; justify-content: space-between; }
+  .modal-eyebrow { font-size: 11px; letter-spacing: 0.1em; color: #8a7554; }
+  .modal-title { font-size: 24px; font-weight: 600; }
+  .modal-close { width: 30px; height: 30px; border-radius: 50%; border: 1px solid #b79b6b; display: flex; align-items: center; justify-content: center; color: #6b5738; }
+  .modal-close svg { width: 14px; height: 14px; }
+
+  .modal-body { padding: 18px 26px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
+
+  .battle-card { background: #e9dab5; border: 1px solid #c3ac7c; border-radius: 10px; padding: 16px; }
+  .battle-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .battle-region { font-size: 16.5px; }
+  .battle-sub { font-size: 12px; color: #8a7554; }
+  .result-badge { font-size: 12px; padding: 5px 12px; border-radius: 999px; letter-spacing: 0.03em; }
+  .result-occupation { background: #d8c17e; color: #4a3510; border: 1px solid #8a6a2e; }
+  .result-retreat { background: #e0d3b0; color: #6b5738; border: 1px solid #b79b6b; }
+  .result-surrender { background: #d8b3ab; color: #5e2323; border: 1px solid #a94b3f; }
+
+  .casualty-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .casualty-cell { background: #f4ead2; border: 1px solid #c3ac7c; border-radius: 8px; padding: 8px 10px; text-align: center; }
+  .casualty-label { font-size: 10.5px; color: #8a7554; letter-spacing: 0.02em; }
+  .casualty-value { font-size: 15px; margin-top: 2px; }
+  .casualty-value.attacker { color: #33465c; }
+  .casualty-value.defender { color: #7c2222; }
+
+  .modal-foot { padding: 16px 26px; border-top: 1px solid #c3ac7c; display: flex; justify-content: flex-end; }
+  .next-btn { padding: 10px 22px; border-radius: 8px; font-size: 14px; letter-spacing: 0.03em;
+    background: linear-gradient(180deg, #c08a3a, #a06a24); color: #fbf3df; border: 1px solid #7c5a1e; }
+
+  text.region-label { font-family: "Cinzel", serif; font-size: 15px; fill: #2a1d10; paint-order: stroke; stroke: #f4ead2; stroke-width: 4px; stroke-linejoin: round; }
+</style>
+</helmet>
+
+<div class="root">
+  <div class="backdrop">
+    <svg viewBox="0 0 1000 700">
+      <g stroke-width="2">
+        <polygon points="560,70 610,80 640,120 630,170 590,200 530,190 500,150 510,100" fill="#c9a24b" stroke="#8a6a2e"/>
+        <polygon points="560,245 615,255 645,300 635,360 590,395 530,385 505,335 515,275" fill="#c9a24b" stroke="#8a6a2e"/>
+        <polygon points="420,270 465,280 495,320 485,380 445,410 385,400 365,350 380,295" fill="#c9a24b" stroke="#8a6a2e"/>
+        <polygon points="240,170 300,180 335,220 325,290 280,325 195,310 165,255 185,200" fill="#5b7ea3" stroke="#35526e"/>
+        <polygon points="300,365 355,375 385,410 375,455 335,480 250,470 220,430 250,385" fill="#5b7ea3" stroke="#35526e"/>
+        <polygon points="560,435 605,445 630,485 615,530 575,555 520,540 505,495 520,455" fill="#8a3b3b" stroke="#5e2323"/>
+        <polygon points="615,565 665,575 690,610 680,650 630,670 570,655 555,615 575,580" fill="#6d5590" stroke="#453764"/>
+      </g>
+      <text class="region-label" x="560" y="140" text-anchor="middle">ザクセン</text>
+      <text class="region-label" x="560" y="325" text-anchor="middle">バイエルン</text>
+      <text class="region-label" x="420" y="350" text-anchor="middle">シュヴァーベン</text>
+      <text class="region-label" x="240" y="260" text-anchor="middle">西フランク</text>
+      <text class="region-label" x="300" y="430" text-anchor="middle">ブルゴーニュ</text>
+      <text class="region-label" x="560" y="510" text-anchor="middle">教皇領</text>
+      <text class="region-label" x="615" y="625" text-anchor="middle">東ローマ</text>
+    </svg>
+  </div>
+  <div class="dim"></div>
+
+  <div class="modal">
+    <div class="modal-head">
+      <div>
+        <div class="modal-eyebrow">戦闘結果ログ ④ 戦闘解決フェイズ</div>
+        <div class="modal-title display">970年 戦闘結果</div>
+      </div>
+      <div class="modal-close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 5l14 14M19 5L5 19"/></svg></div>
+    </div>
+
+    <div class="modal-body">
+      <div class="battle-card">
+        <div class="battle-top">
+          <div><div class="battle-region">ブルゴーニュ</div><div class="battle-sub">神聖ローマ帝国 攻撃 → 西フランク王国 防衛</div></div>
+          <span class="result-badge result-occupation">結果: 占領</span>
+        </div>
+        <div class="casualty-grid">
+          <div class="casualty-cell"><div class="casualty-label">味方 死傷</div><div class="casualty-value attacker">320</div></div>
+          <div class="casualty-cell"><div class="casualty-label">敵 死傷</div><div class="casualty-value defender">1,150</div></div>
+          <div class="casualty-cell"><div class="casualty-label">捕虜</div><div class="casualty-value">400</div></div>
+        </div>
+      </div>
+
+      <div class="battle-card">
+        <div class="battle-top">
+          <div><div class="battle-region">教皇領</div><div class="battle-sub">東ローマ帝国 攻撃 → 教皇領 防衛</div></div>
+          <span class="result-badge result-retreat">結果: 退却</span>
+        </div>
+        <div class="casualty-grid">
+          <div class="casualty-cell"><div class="casualty-label">味方 死傷</div><div class="casualty-value attacker">480</div></div>
+          <div class="casualty-cell"><div class="casualty-label">敵 死傷</div><div class="casualty-value defender">210</div></div>
+          <div class="casualty-cell"><div class="casualty-label">捕虜</div><div class="casualty-value">0</div></div>
+        </div>
+      </div>
+
+      <div class="battle-card">
+        <div class="battle-top">
+          <div><div class="battle-region">バイエルン</div><div class="battle-sub">自由傭兵団 攻撃 → 神聖ローマ帝国 防衛</div></div>
+          <span class="result-badge result-surrender">結果: 降伏</span>
+        </div>
+        <div class="casualty-grid">
+          <div class="casualty-cell"><div class="casualty-label">味方 死傷</div><div class="casualty-value attacker">140</div></div>
+          <div class="casualty-cell"><div class="casualty-label">敵 死傷</div><div class="casualty-value defender">90</div></div>
+          <div class="casualty-cell"><div class="casualty-label">捕虜</div><div class="casualty-value">1,600</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-foot">
+      <div class="next-btn">年末集計へ進む</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
