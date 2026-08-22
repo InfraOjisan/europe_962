@@ -111,21 +111,6 @@ function declareWarBetween(state: GameState, a: FactionId, b: FactionId): GameSt
   };
 }
 
-/** 生存している lord 型勢力同士を総当たりで戦争状態にする（欧州規模の大戦イベント用）。 */
-function declareContinentalWar(state: GameState): GameState {
-  const lords = Object.values(state.factions).filter((f) => f.alive && f.type === "lord");
-  let factions = state.factions;
-  for (const a of lords) {
-    let diplomacy = factions[a.id]?.diplomacy ?? {};
-    for (const b of lords) {
-      if (a.id === b.id) continue;
-      diplomacy = { ...diplomacy, [b.id]: "war" };
-    }
-    factions = { ...factions, [a.id]: { ...factions[a.id]!, diplomacy } };
-  }
-  return { ...state, factions };
-}
-
 // --- 年表 --------------------------------------------------------------------
 
 const HRE = asFactionId("faction_hre");
@@ -160,6 +145,42 @@ const HRE_CORE_FACTION_IDS: readonly FactionId[] = [
   asFactionId("faction_luxembourg"),
   asFactionId("faction_flanders"),
 ];
+
+/**
+ * 西フランク（本イベント年表では一貫して「フランス」を代表する勢力ID）を起点に、
+ * 既存の同盟国を除く全ての外交関係を戦争状態にする（ナポレオン戦争イベント用）。
+ *
+ * 当初は「生存する全ての領主家を無条件に総当たりで開戦させる」実装だったが、
+ * 27勢力規模のシナリオではこれが war_ratio を機械的に100%近くへ押し上げ、
+ * 大戦回避の最終防波堤（`wouldSingleHandedlyTriggerGreatWar`、turnEngine.ts）を
+ * 経由しないこのイベントだけが常に無警告・無条件で大戦を確定させてしまっていた
+ * （ユーザーからの指摘：1799年に前触れなくゲームが終了する）。
+ *
+ * 史実どおり「フランス（革命政権・ナポレオン）を震源とする一連の対仏大同盟戦争」という
+ * 構図に絞ることで、影響範囲を西フランクが実際に外交関係を持つ相手だけに限定した
+ * ——それまでのプレイで西フランクがどれだけ広く関係を築いていたか（＝どれだけ大陸政治に
+ * 深く関与していたか）が、このイベントの深刻さにそのまま反映される。西フランクが
+ * 既に滅亡・併合されている場合はこの形の大戦は起こらない（no-op）。
+ */
+function declareNapoleonicWars(state: GameState): GameState {
+  const napoleon = state.factions[WEST_FRANCIA];
+  if (!napoleon || !napoleon.alive) return state;
+
+  let factions = state.factions;
+  let napoleonDiplomacy = napoleon.diplomacy;
+  for (const [counterpartId, stance] of Object.entries(napoleon.diplomacy)) {
+    if (stance === "alliance") continue;
+    const counterpart = factions[asFactionId(counterpartId)];
+    if (!counterpart || !counterpart.alive) continue;
+    napoleonDiplomacy = { ...napoleonDiplomacy, [counterpartId]: "war" };
+    factions = {
+      ...factions,
+      [counterpartId]: { ...counterpart, diplomacy: { ...counterpart.diplomacy, [WEST_FRANCIA]: "war" } },
+    };
+  }
+  factions = { ...factions, [WEST_FRANCIA]: { ...napoleon, diplomacy: napoleonDiplomacy } };
+  return { ...state, factions };
+}
 
 export const HISTORICAL_EVENTS: readonly HistoricalEvent[] = [
   {
@@ -381,7 +402,11 @@ export const HISTORICAL_EVENTS: readonly HistoricalEvent[] = [
     id: "napoleonic_wars_1799",
     year: 1799,
     name: "ナポレオン戦争",
-    description: "欧州規模の大戦争が起きた。生存する全ての領主家が互いに戦争状態に入る（大戦判定と直結しうる）。",
-    apply: (state) => declareContinentalWar(state),
+    description:
+      "革命政権・ナポレオンのフランス（西フランク）が、同盟国を除く全ての外交関係にある" +
+      "相手と交戦状態に入った。フランスがそれまでどれだけ広く大陸政治に関与していたかが、" +
+      "この対仏大同盟戦争の規模——ひいては大戦判定に直結する可能性——にそのまま反映される" +
+      "（ゲーム理論的な宿命論の集大成となりうるイベント）。",
+    apply: (state) => declareNapoleonicWars(state),
   },
 ];

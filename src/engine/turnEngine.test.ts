@@ -747,3 +747,53 @@ describe("州直属の駐留兵による防衛（設計書 3.1、Region.garrison
     expect(validateGameState(next).issues).toEqual([]);
   });
 });
+
+describe("近攻遠交（設計書 9.4／ユーザー要望）", () => {
+  // A（弱い）は隣接する B（強い、脅威）と交戦中。B は C（A とは非隣接）とも隣接している。
+  // A にとって C は「脅威 B を挟んで反対側にいる」遠交の候補になる。
+  const factionA = asFactionId("faction_a");
+  const factionB = asFactionId("faction_b");
+  const factionC = asFactionId("faction_c");
+  const regionA = asRegionId("region_a");
+  const regionB = asRegionId("region_b");
+  const regionC = asRegionId("region_c");
+
+  function buildState(): GameState {
+    const rulerA = makeCharacter({ id: asCharacterId("ruler_a"), name: "A候", faction: factionA, policy: "self_preservation" });
+    const rulerB = makeCharacter({ id: asCharacterId("ruler_b"), name: "B候", faction: factionB });
+    const rulerC = makeCharacter({ id: asCharacterId("ruler_c"), name: "C候", faction: factionC });
+
+    const rA = makeRegion({ id: regionA, owner: factionA, adjacency: [regionB], garrison: { count: 100, training: 0.3 } });
+    const rB = makeRegion({ id: regionB, owner: factionB, adjacency: [regionA, regionC], garrison: { count: 20_000, training: 0.9 } });
+    const rC = makeRegion({ id: regionC, owner: factionC, adjacency: [regionB], garrison: { count: 500, training: 0.5 } });
+
+    const fA = makeFaction({ id: factionA, name: "A国", ruler: rulerA.id, regions: [regionA], diplomacy: { [factionB]: "war" } });
+    const fB = makeFaction({ id: factionB, name: "B国（脅威）", ruler: rulerB.id, regions: [regionB], diplomacy: { [factionA]: "war", [factionC]: "peace" } });
+    const fC = makeFaction({ id: factionC, name: "C国（遠交の相手）", ruler: rulerC.id, regions: [regionC], diplomacy: { [factionB]: "peace" } });
+    // 大戦誤爆防止用の中立勢力。
+    const neutral1 = makeFaction({ id: asFactionId("neutral1"), name: "中立1", ruler: null });
+    const neutral2 = makeFaction({ id: asFactionId("neutral2"), name: "中立2", ruler: null });
+
+    return {
+      turn: 1,
+      year: 1000,
+      phase: "diplomacy",
+      regions: { [regionA]: rA, [regionB]: rB, [regionC]: rC },
+      factions: { [factionA]: fA, [factionB]: fB, [factionC]: fC, [neutral1.id]: neutral1, [neutral2.id]: neutral2 },
+      armies: {},
+      characters: { [rulerA.id]: rulerA, [rulerB.id]: rulerB, [rulerC.id]: rulerC },
+      captivities: {},
+      greatWarTriggered: false,
+      playerFactionId: null,
+      spectator: null,
+    };
+  }
+
+  it("脅威（B）と交戦中のAは、Bを挟んで反対側にいるCへ同盟を持ちかける", () => {
+    const state = buildState();
+    const next = runDiplomacy(state);
+
+    expect(next.factions[factionA]?.diplomacy[factionC]).toBe("alliance");
+    expect(next.factions[factionC]?.diplomacy[factionA]).toBe("alliance");
+  });
+});
