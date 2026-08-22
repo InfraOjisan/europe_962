@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { asArmyId, asFactionId, asRegionId } from "../models/ids.js";
+import { asArmyId, asCharacterId, asFactionId, asRegionId } from "../models/ids.js";
 import type { Army } from "../models/army.js";
 import type { Region } from "../models/region.js";
 import { resolveBattle } from "./combatEngine.js";
@@ -98,5 +98,36 @@ describe("resolveBattle", () => {
 
     expect(outcome.kind).toBe("retreat");
     expect(outcome.newOwner).toBeNull();
+    expect(outcome.capturedCommander).toBeNull(); // 退路がある場合は捕虜も発生しない
+  });
+
+  it("退路がなく指揮官が同行している場合、敗者の指揮官が捕虜になる（設計書 5.1）", () => {
+    const defenderCommander = asCharacterId("char_defender_commander");
+    const attackerArmy = makeArmy({
+      id: asArmyId("army_attacker"),
+      faction: asFactionId("faction_attacker"),
+      units: [{ type: "infantry", count: 5000, training: 0.8 }],
+      morale: 0.9,
+    });
+    const defenderArmy = makeArmy({
+      id: asArmyId("army_defender"),
+      faction: asFactionId("faction_defender"),
+      commander: defenderCommander,
+      units: [{ type: "infantry", count: 500, training: 0.3 }],
+      morale: 0.5,
+    });
+
+    const outcome = resolveBattle({
+      turn: 1,
+      region, // adjacency: [] なので退路なし
+      regionsById: { [region.id]: region },
+      attackerFaction: attackerArmy.faction,
+      defenderFaction: defenderArmy.faction,
+      attackerArmy,
+      defenderArmy,
+    });
+
+    expect(outcome.kind).toBe("occupation");
+    expect(outcome.capturedCommander).toBe(defenderCommander);
   });
 });

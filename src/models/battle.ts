@@ -1,4 +1,4 @@
-import type { ArmyId, FactionId, RegionId } from "./ids.js";
+import type { ArmyId, CharacterId, FactionId, RegionId } from "./ids.js";
 
 /**
  * 戦闘結果の種別。
@@ -38,6 +38,12 @@ export interface BattleOutcome {
    * それ以外は null。
    */
   readonly newOwner: FactionId | null;
+  /**
+   * kind === "surrender" で、降伏した側に同行していた指揮官が退路なく捕縛された場合に
+   * その CharacterId を設定する（設計書 5.1）。指揮官不在、または捕縛が発生しない場合は null。
+   * 呼び出し側（ターン処理）がこれを見て `captivities` にエントリを作成する。
+   */
+  readonly capturedCommander: CharacterId | null;
   /** この戦闘が発生したゲーム内ターン。 */
   readonly turn: number;
 }

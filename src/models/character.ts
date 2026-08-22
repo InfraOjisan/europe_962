@@ -9,6 +9,7 @@ import type { CharacterId, FactionId } from "./ids.js";
  * - warlord:    戦闘隊長。部隊編成・移動・戦闘・退却・略奪・人質売買を行う。複数人保持可。
  * - consort:    妃。行動フェイズのアクションは持たないが、政略結婚・相続の対象になる。
  * - heir:       子女。政略結婚の対象・将来の後継者候補（相続処理で ruler 等に遷移しうる）。
+ *               「後継者に指定されている」ことは意味しない（それは Faction.heir が指す）。
  */
 export type CharacterRole = "ruler" | "chancellor" | "warlord" | "consort" | "heir";
 
@@ -48,6 +49,16 @@ export interface Character {
   readonly alive: boolean;
   /** 配偶者（君主の妻など）。政略結婚の結果として設定される。 */
   readonly spouse: CharacterId | null;
-  /** 子女。相続・政略結婚のために保持する。 */
+  /** 実子。相続・政略結婚のために保持する。 */
   readonly children: readonly CharacterId[];
+
+  /**
+   * 実親（0〜2人）。血族ネットワーク・親等計算（設計書 4.1）の起点になる。
+   * 初期データ等で系譜が不明な人物は空配列でよい。
+   */
+  readonly parents: readonly CharacterId[];
+  /** 養子（設計書 4.2）。実子とは区別するが、後継候補としては同格に扱う。 */
+  readonly adoptedChildren: readonly CharacterId[];
+  /** 自分が養子である場合の養親。実親ではない。 */
+  readonly adoptedBy: CharacterId | null;
 }

@@ -1,4 +1,5 @@
 import type { Army } from "./army.js";
+import type { Captivity } from "./captivity.js";
 import type { Character } from "./character.js";
 import type { Faction } from "./faction.js";
 import type { ArmyId, CharacterId, FactionId, RegionId } from "./ids.js";
@@ -27,6 +28,8 @@ export interface GameState {
   readonly factions: Readonly<Record<FactionId, Faction>>;
   readonly armies: Readonly<Record<ArmyId, Army>>;
   readonly characters: Readonly<Record<CharacterId, Character>>;
+  /** 捕虜・人質。設計書 5章。キーは captive の CharacterId（1人1エントリ）。 */
+  readonly captivities: Readonly<Record<CharacterId, Captivity>>;
   /** 大戦発生によりゲームが終了しているか。 */
   readonly greatWarTriggered: boolean;
 }

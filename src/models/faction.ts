@@ -18,6 +18,12 @@ export interface Faction {
   readonly ruler: CharacterId | null;
   readonly consort: CharacterId | null;
   readonly children: readonly CharacterId[];
+  /**
+   * 後継指定（設計書 4.2）。実子・養子の中から君主が指定した後継者。
+   * null の場合、君主死亡時に既定ルールで自動選出するか、候補が誰もいなければ
+   * 後継者危機（設計書 4.3）に移行する。傭兵団では常に null。
+   */
+  readonly heir: CharacterId | null;
 
   /** 宰相（複数可）。傭兵団の場合は「経済担当」として扱う。 */
   readonly chancellors: readonly CharacterId[];

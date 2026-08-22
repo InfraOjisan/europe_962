@@ -4,6 +4,7 @@ import type { DoctrineId } from "../models/army.js";
 import type { FactionId } from "../models/ids.js";
 import type { Region } from "../models/region.js";
 
+
 /**
  * ⚠️ 戦闘解決エンジン（草案・未バランス調整）
  * ============================================================
@@ -172,10 +173,13 @@ export function resolveBattle(input: BattleResolutionInput): BattleOutcome {
           attackerCasualties,
           defenderCasualties,
           newOwner: null,
+          capturedCommander: null,
           turn,
         };
       }
 
+      // 退路がない（escaped === false）ため、同行していた指揮官もそのまま捕虜になる（設計書 5.1）。
+      const loserArmy = loserIsDefender ? defender : attacker;
       return {
         kind: loserIsDefender ? "occupation" : "surrender",
         region: region.id,
@@ -186,6 +190,7 @@ export function resolveBattle(input: BattleResolutionInput): BattleOutcome {
         attackerCasualties,
         defenderCasualties,
         newOwner: loserIsDefender ? attackerFaction : defenderFaction,
+        capturedCommander: loserArmy.commander,
         turn,
       };
     }
@@ -201,6 +206,7 @@ export function resolveBattle(input: BattleResolutionInput): BattleOutcome {
     attackerCasualties: { killed: attackerKilled, captured: 0, moraleAfter: attacker.morale },
     defenderCasualties: { killed: defenderKilled, captured: 0, moraleAfter: defender.morale },
     newOwner: null,
+    capturedCommander: null,
     turn,
   };
 }

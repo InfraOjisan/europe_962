@@ -11,6 +11,10 @@ import type { Region } from "../models/region.js";
  * データモデルを実際に組み立てて動かせることを示すための最小デモセットであり、
  * 史実の完全な再現・網羅を意図したものではない（州7つ・勢力4+傭兵1のみ）。
  * 本格的なシナリオデータは今後別途拡充する。
+ *
+ * 系譜（parents/children/adoptedChildren/adoptedBy）はゲーム開始時点では
+ * 誰も子女を持たないため空にしている（設計書 4章の継承・養子縁組システムは
+ * ゲーム開始後のプレイで実際に使われる想定）。
  */
 
 // --- Regions --------------------------------------------------------------
@@ -125,6 +129,9 @@ export const initialRegions: readonly Region[] = [
 
 // --- Characters ------------------------------------------------------------
 
+/** 系譜情報が不明・未設定の人物向けの既定値。 */
+const NO_LINEAGE = { parents: [] as const, adoptedChildren: [] as const, adoptedBy: null } as const;
+
 const charOtto1: Character = {
   id: asCharacterId("char_otto1"),
   name: "オットー1世",
@@ -136,6 +143,7 @@ const charOtto1: Character = {
   alive: true,
   spouse: asCharacterId("char_adelaide"),
   children: [],
+  ...NO_LINEAGE,
 };
 
 const charAdelaide: Character = {
@@ -149,6 +157,7 @@ const charAdelaide: Character = {
   alive: true,
   spouse: asCharacterId("char_otto1"),
   children: [],
+  ...NO_LINEAGE,
 };
 
 const charHermann: Character = {
@@ -162,6 +171,7 @@ const charHermann: Character = {
   alive: true,
   spouse: null,
   children: [],
+  ...NO_LINEAGE,
 };
 
 const charBurchard: Character = {
@@ -175,6 +185,7 @@ const charBurchard: Character = {
   alive: true,
   spouse: null,
   children: [],
+  ...NO_LINEAGE,
 };
 
 const charLothair: Character = {
@@ -188,6 +199,7 @@ const charLothair: Character = {
   alive: true,
   spouse: null,
   children: [],
+  ...NO_LINEAGE,
 };
 
 const charGuyDeVermandois: Character = {
@@ -201,6 +213,7 @@ const charGuyDeVermandois: Character = {
   alive: true,
   spouse: null,
   children: [],
+  ...NO_LINEAGE,
 };
 
 const charJohn12: Character = {
@@ -214,6 +227,7 @@ const charJohn12: Character = {
   alive: true,
   spouse: null,
   children: [],
+  ...NO_LINEAGE,
 };
 
 const charNikephoros: Character = {
@@ -227,6 +241,7 @@ const charNikephoros: Character = {
   alive: true,
   spouse: null,
   children: [],
+  ...NO_LINEAGE,
 };
 
 const charCondottiere: Character = {
@@ -240,6 +255,7 @@ const charCondottiere: Character = {
   alive: true,
   spouse: null,
   children: [],
+  ...NO_LINEAGE,
 };
 
 export const initialCharacters: readonly Character[] = [
@@ -263,6 +279,7 @@ const factionHre: Faction = {
   ruler: charOtto1.id,
   consort: charAdelaide.id,
   children: [],
+  heir: null, // まだ子女がいないため未指定（設計書 4.2）
   chancellors: [charHermann.id],
   warlords: [charBurchard.id],
   regions: [regionSaxony.id, regionBavaria.id, regionSwabia.id],
@@ -282,6 +299,7 @@ const factionWestFrancia: Faction = {
   ruler: charLothair.id,
   consort: null,
   children: [],
+  heir: null,
   chancellors: [],
   warlords: [charGuyDeVermandois.id],
   regions: [regionFrancia.id, regionBurgundy.id],
@@ -299,6 +317,7 @@ const factionPapal: Faction = {
   ruler: charJohn12.id,
   consort: null,
   children: [],
+  heir: null,
   chancellors: [],
   warlords: [],
   regions: [regionPapalStates.id],
@@ -317,6 +336,7 @@ const factionByzantium: Faction = {
   ruler: charNikephoros.id,
   consort: null,
   children: [],
+  heir: null,
   chancellors: [],
   warlords: [],
   regions: [regionByzantium.id],
@@ -335,6 +355,7 @@ const factionFreeCompany: Faction = {
   ruler: null,
   consort: null,
   children: [],
+  heir: null, // 傭兵団は家系を持たないため常に null
   chancellors: [],
   warlords: [charCondottiere.id],
   regions: [],
@@ -395,6 +416,7 @@ export function createInitialGameState(): GameState {
     factions: byId(initialFactions),
     armies: byId(initialArmies),
     characters: byId(initialCharacters),
+    captivities: {},
     greatWarTriggered: false,
   };
 }

@@ -69,6 +69,14 @@ export function validateGameState(state: GameState): ValidationResult {
         issues.push({ path: `factions.${faction.id}`, message: `未知の人物: ${charId}` });
       }
     }
+    if (faction.heir !== null) {
+      const heir = state.characters[faction.heir];
+      if (!heir) {
+        issues.push({ path: `factions.${faction.id}.heir`, message: `未知の人物: ${faction.heir}` });
+      } else if (heir.faction !== faction.id) {
+        issues.push({ path: `factions.${faction.id}.heir`, message: `heir ${faction.heir} は自勢力の人物ではない` });
+      }
+    }
     for (const [otherId, stance] of Object.entries(faction.diplomacy)) {
       if (!factionIds.has(otherId)) {
         issues.push({ path: `factions.${faction.id}.diplomacy`, message: `未知の勢力: ${otherId} (${stance})` });
@@ -93,6 +101,52 @@ export function validateGameState(state: GameState): ValidationResult {
   for (const character of Object.values(state.characters)) {
     if (!factionIds.has(character.faction)) {
       issues.push({ path: `characters.${character.id}.faction`, message: `未知の勢力: ${character.faction}` });
+    }
+    for (const parentId of character.parents) {
+      if (!characterIds.has(parentId)) {
+        issues.push({ path: `characters.${character.id}.parents`, message: `未知の人物: ${parentId}` });
+      }
+    }
+    for (const childId of character.adoptedChildren) {
+      const child = state.characters[childId];
+      if (!child) {
+        issues.push({ path: `characters.${character.id}.adoptedChildren`, message: `未知の人物: ${childId}` });
+      } else if (child.adoptedBy !== character.id) {
+        issues.push({
+          path: `characters.${character.id}.adoptedChildren`,
+          message: `${childId}.adoptedBy が ${character.id} を指していない（片方向の不整合）`,
+        });
+      }
+    }
+    if (character.adoptedBy !== null) {
+      const parent = state.characters[character.adoptedBy];
+      if (!parent) {
+        issues.push({ path: `characters.${character.id}.adoptedBy`, message: `未知の人物: ${character.adoptedBy}` });
+      } else if (!parent.adoptedChildren.includes(character.id)) {
+        issues.push({
+          path: `characters.${character.id}.adoptedBy`,
+          message: `${parent.id}.adoptedChildren が ${character.id} を含んでいない（片方向の不整合）`,
+        });
+      }
+    }
+  }
+
+  // --- Captivity ---
+  for (const [key, captivity] of Object.entries(state.captivities)) {
+    if (key !== captivity.captive) {
+      issues.push({ path: `captivities.${key}`, message: `キーと captive が一致しない: ${captivity.captive}` });
+    }
+    if (!characterIds.has(captivity.captive)) {
+      issues.push({ path: `captivities.${key}.captive`, message: `未知の人物: ${captivity.captive}` });
+    }
+    if (!factionIds.has(captivity.captor)) {
+      issues.push({ path: `captivities.${key}.captor`, message: `未知の勢力: ${captivity.captor}` });
+    }
+    if (!factionIds.has(captivity.homeFaction)) {
+      issues.push({ path: `captivities.${key}.homeFaction`, message: `未知の勢力: ${captivity.homeFaction}` });
+    }
+    if (captivity.ransomDemand < 0) {
+      issues.push({ path: `captivities.${key}.ransomDemand`, message: `身代金が負数: ${captivity.ransomDemand}` });
     }
   }
 
