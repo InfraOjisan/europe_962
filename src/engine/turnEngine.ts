@@ -803,3 +803,28 @@ export function advanceYear(state: GameState, options: TurnEngineOptions = {}): 
   } while (next.year === startingYear);
   return next;
 }
+
+/**
+ * `advanceYear` の生成AI丸投げ版（設計書 13.1章の "major decision" エスカレーション）。
+ * 年始・戦闘解決・年末集計フェイズは `advanceYear` と同じ同期処理を使い、
+ * 外交・行動フェイズだけ `runDiplomacyAsync`/`runActionAsync`（`decideAction`：生成AI優先・
+ * 失敗時は自動的に点数判断へフォールバック）に差し替える。1年ごとに外部LLMへ
+ * 複数回問い合わせるため、`advanceYear` に比べて低速・低コストではない
+ * （毎ターン使うのではなく、"major decision" と判断した局面での利用を想定）。
+ */
+export async function advanceYearAsync(
+  state: GameState,
+  aiConfig?: AIProviderConfig,
+  options: TurnEngineOptions = {},
+): Promise<GameState> {
+  if (state.greatWarTriggered) return state;
+  const startingYear = state.year;
+  let next = state;
+  do {
+    if (next.phase === "diplomacy") next = await runDiplomacyAsync(next, aiConfig);
+    else if (next.phase === "action") next = await runActionAsync(next, aiConfig);
+    else next = runPhase(next, options);
+    if (next.greatWarTriggered) break;
+  } while (next.year === startingYear);
+  return next;
+}

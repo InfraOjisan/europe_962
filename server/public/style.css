@@ -1,0 +1,90 @@
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  height: 100%;
+  background: #ece0c4;
+  background-image:
+    radial-gradient(ellipse at 15% 10%, rgba(255,255,255,0.35), transparent 55%),
+    radial-gradient(ellipse at 85% 90%, rgba(122,90,40,0.12), transparent 55%);
+  font-family: "EB Garamond", Georgia, serif;
+  color: #3a2a1a;
+}
+.brand-title, .panel-title, .brand-year { font-family: "Cinzel", Georgia, serif; letter-spacing: 0.03em; }
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 12px 24px;
+  background: linear-gradient(180deg, #f4ead2, #e9dab5);
+  border-bottom: 2px solid #8a6a3f;
+  flex-wrap: wrap;
+}
+.brand-title { font-size: 13px; color: #6b5738; }
+.brand-year { font-size: 20px; font-weight: 600; }
+.turn-sub { font-family: "EB Garamond", Georgia, serif; font-size: 14px; color: #6b5738; }
+.spacer { flex: 1 1 auto; }
+
+.war-gauge { display: flex; flex-direction: column; gap: 3px; width: 180px; }
+.war-gauge-label { display: flex; justify-content: space-between; font-size: 12px; color: #6b5738; }
+.war-gauge-track { height: 8px; border-radius: 4px; background: #d8c497; border: 1px solid #b79b6b; overflow: hidden; }
+.war-gauge-fill {
+  height: 100%; width: 0%;
+  background: linear-gradient(90deg, #4d7c3f, #b79b3f);
+  transition: width 0.4s ease, background 0.4s ease;
+}
+
+.ai-toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #5c4a2e; }
+
+.btn {
+  padding: 9px 16px; border-radius: 8px; font-size: 14px; letter-spacing: 0.02em;
+  border: 1px solid #7c5a1e; cursor: pointer;
+}
+.btn-primary { background: linear-gradient(180deg, #c08a3a, #a06a24); color: #fbf3df; }
+.btn-primary:disabled { opacity: 0.5; cursor: default; }
+.btn-outline { background: #ddc99a; color: #5c4a2e; }
+
+.gameover-banner {
+  padding: 10px 24px; background: #7c2222; color: #fbf3df; font-weight: 600; text-align: center;
+}
+.gameover-banner.hidden { display: none; }
+
+.body-row {
+  display: grid;
+  grid-template-columns: 2fr 1.4fr 1.2fr;
+  gap: 1px;
+  background: #b79b6b;
+  min-height: calc(100vh - 70px);
+}
+@media (max-width: 1000px) { .body-row { grid-template-columns: 1fr; } }
+
+.panel { background: #f4ead2; padding: 16px; overflow-y: auto; }
+.panel-title { font-size: 14px; color: #6b5738; margin-bottom: 10px; border-bottom: 1px solid #c3ac7c; padding-bottom: 6px; }
+
+.region-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.region-card {
+  border: 2px solid #8a6a2e; border-radius: 8px; padding: 10px; background: #ddc99a;
+  font-size: 13px;
+}
+.region-card .r-name { font-family: "Cinzel", Georgia, serif; font-size: 14px; margin-bottom: 4px; }
+.region-card .r-owner { font-size: 12px; margin-bottom: 6px; padding: 2px 6px; border-radius: 4px; display: inline-block; color: #fbf3df; }
+.region-card .r-meta { font-size: 11.5px; color: #5c4a2e; line-height: 1.5; }
+.region-card .r-flags { margin-top: 6px; display: flex; gap: 6px; font-size: 11px; }
+.flag { padding: 1px 6px; border-radius: 3px; background: #b79b6b; color: #3a2a1a; }
+.flag.frontier { background: #a94b3f; color: #fbf3df; }
+.flag.fortified { background: #6b6258; color: #fbf3df; }
+.flag.siege { background: #7c2222; color: #fbf3df; }
+
+.faction-list, .army-list, .log-list { display: flex; flex-direction: column; gap: 8px; }
+.faction-card { border: 1px solid #c3ac7c; border-radius: 6px; padding: 8px 10px; background: #f8f1de; font-size: 13px; }
+.faction-card.dead { opacity: 0.5; text-decoration: line-through; }
+.faction-card .f-name { font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+.faction-card .f-meta { font-size: 11.5px; color: #6b5738; margin-top: 3px; }
+.war-badge { background: #7c2222; color: #fbf3df; font-size: 10.5px; padding: 1px 6px; border-radius: 3px; }
+
+.army-card { border: 1px solid #c3ac7c; border-radius: 6px; padding: 7px 10px; background: #f8f1de; font-size: 12.5px; }
+
+.log-list { font-size: 12.5px; }
+.log-year { font-weight: 600; margin-top: 6px; color: #6b5738; }
+.log-line { padding: 2px 0 2px 8px; border-left: 2px solid #c3ac7c; }
+.log-empty { color: #8a7554; font-size: 12.5px; }

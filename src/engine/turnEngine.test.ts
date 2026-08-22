@@ -7,6 +7,7 @@ import type { GameState } from "../models/gameState.js";
 import type { Region } from "../models/region.js";
 import {
   advanceYear,
+  advanceYearAsync,
   detectFlanking,
   detectSurprise,
   findMostConsequentialHostilePair,
@@ -671,5 +672,17 @@ describe("行動フェイズへのAI接続（設計書 9.4）", () => {
     const next = runAction(state);
 
     expect(next.armies[asArmyId("army_attacker")]?.location).toBe(homeId);
+  });
+});
+
+describe("advanceYearAsync（生成AI丸投げ版、設計書 13.1）", () => {
+  it("APIキー未設定なら自動的に点数判断へフォールバックしつつ、1年分を通しで処理する", async () => {
+    const state = createInitialGameState();
+    const next = await advanceYearAsync(state); // aiConfig省略＝APIキー未解決→フォールバック
+
+    expect(next.year).toBe(state.year + 1);
+    expect(next.turn).toBe(state.turn + 1);
+    expect(next.phase).toBe("year_start");
+    expect(validateGameState(next).issues).toEqual([]);
   });
 });
