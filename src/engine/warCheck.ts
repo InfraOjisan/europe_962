@@ -30,3 +30,14 @@ export function checkGreatWar(state: GameState): GreatWarCheckResult {
     aliveFactions: alive.length,
   };
 }
+
+/**
+ * 大戦への「近さ」（設計書 9.4 / 13章）。0〜1 で、`warRatio` を大戦判定の閾値
+ * （2/3）で正規化したもの（1.0 に達すると大戦発生）。生成AI丸投げ方式では、
+ * 意思決定の状況（`DecisionContext.greatWarProximity`）に必ず含めることで、
+ * 「戦争を選び続けると必ず世界が詰む」というコアルールをAIの判断にも反映させる。
+ */
+export function greatWarProximity(state: GameState): number {
+  const { warRatio } = checkGreatWar(state);
+  return Math.min(1, warRatio / GREAT_WAR_THRESHOLD);
+}

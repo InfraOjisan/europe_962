@@ -32,6 +32,7 @@ const regionSaxony: Region = {
   adjacency: [asRegionId("region_bavaria"), asRegionId("region_francia")],
   fortified: false,
   siege: null,
+  frontier: false,
 };
 
 const regionBavaria: Region = {
@@ -47,6 +48,7 @@ const regionBavaria: Region = {
   adjacency: [asRegionId("region_saxony"), asRegionId("region_swabia")],
   fortified: false,
   siege: null,
+  frontier: false,
 };
 
 const regionSwabia: Region = {
@@ -62,6 +64,7 @@ const regionSwabia: Region = {
   adjacency: [asRegionId("region_bavaria"), asRegionId("region_burgundy"), asRegionId("region_papal_states")],
   fortified: true,
   siege: null,
+  frontier: false,
 };
 
 const regionFrancia: Region = {
@@ -77,6 +80,7 @@ const regionFrancia: Region = {
   adjacency: [asRegionId("region_saxony"), asRegionId("region_burgundy")],
   fortified: false,
   siege: null,
+  frontier: false,
 };
 
 const regionBurgundy: Region = {
@@ -92,6 +96,7 @@ const regionBurgundy: Region = {
   adjacency: [asRegionId("region_francia"), asRegionId("region_swabia")],
   fortified: false,
   siege: null,
+  frontier: false,
 };
 
 const regionPapalStates: Region = {
@@ -107,6 +112,7 @@ const regionPapalStates: Region = {
   adjacency: [asRegionId("region_swabia"), asRegionId("region_byzantium")],
   fortified: true,
   siege: null,
+  frontier: false,
 };
 
 const regionByzantium: Region = {
@@ -122,6 +128,9 @@ const regionByzantium: Region = {
   adjacency: [asRegionId("region_papal_states")],
   fortified: false,
   siege: null,
+  // 東ローマは史実でもセルジューク・後のオスマン等、東方からの継続的な圧力に晒される辺境。
+  // 版図外勢力の天災的侵寇イベント（設計書 13章、offMapThreats.ts）の対象州として扱う。
+  frontier: true,
 };
 
 export const initialRegions: readonly Region[] = [
@@ -305,6 +314,7 @@ const factionHre: Faction = {
     [asFactionId("faction_papal")]: "alliance",
     [asFactionId("faction_byzantium")]: "peace",
   },
+  suzerain: null,
   alive: true,
 };
 
@@ -323,6 +333,7 @@ const factionWestFrancia: Faction = {
   diplomacy: {
     [asFactionId("faction_hre")]: "peace",
   },
+  suzerain: null,
   alive: true,
 };
 
@@ -342,6 +353,7 @@ const factionPapal: Faction = {
     [asFactionId("faction_hre")]: "alliance",
     [asFactionId("faction_byzantium")]: "peace",
   },
+  suzerain: null,
   alive: true,
 };
 
@@ -361,6 +373,7 @@ const factionByzantium: Faction = {
     [asFactionId("faction_hre")]: "peace",
     [asFactionId("faction_papal")]: "peace",
   },
+  suzerain: null,
   alive: true,
 };
 
@@ -377,6 +390,7 @@ const factionFreeCompany: Faction = {
   regions: [],
   treasury: 800,
   diplomacy: {},
+  suzerain: null,
   alive: true,
 };
 
@@ -434,5 +448,7 @@ export function createInitialGameState(): GameState {
     characters: byId(initialCharacters),
     captivities: {},
     greatWarTriggered: false,
+    playerFactionId: null,
+    spectator: null,
   };
 }

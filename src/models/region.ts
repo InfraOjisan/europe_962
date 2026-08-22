@@ -43,4 +43,9 @@ export interface Region {
   readonly fortified: boolean;
   /** 包囲中でなければ null。 */
   readonly siege: SiegeState | null;
+  /**
+   * 版図外勢力（モンゴル・ティムール・オスマン＝ペルシャ等、設計書 13章）と接する辺境州か。
+   * true の州のみが `offMapThreats.ts` の天災的侵寇イベントの対象になる。
+   */
+  readonly frontier: boolean;
 }

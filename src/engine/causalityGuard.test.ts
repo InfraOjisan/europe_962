@@ -18,6 +18,7 @@ const region: Region = {
   adjacency: [],
   fortified: false,
   siege: null,
+  frontier: false,
 };
 
 function makeArmy(overrides: Partial<Army>): Army {

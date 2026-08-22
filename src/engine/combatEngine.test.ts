@@ -24,6 +24,7 @@ const region: Region = {
   adjacency: [], // 隣接なし = 敗者に退路がない
   fortified: false,
   siege: null,
+  frontier: false,
 };
 
 function makeArmy(overrides: Partial<Army>): Army {

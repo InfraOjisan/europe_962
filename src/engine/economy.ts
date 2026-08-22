@@ -86,3 +86,17 @@ export function garrisonUpkeep(region: Region): number {
 export function armyUpkeep(army: Pick<Army, "units">): number {
   return army.units.reduce((sum, u) => sum + u.count, 0) * 0.08;
 }
+
+/**
+ * 天候係数のUI表示カテゴリ（設計書 7.7）。マップ画面の背景色・アイコンを
+ * 天候係数から一意に決めるための分類。`POOR_HARVEST_THRESHOLD`/`BUMPER_HARVEST_THRESHOLD`
+ * と同じしきい値を使い、経済側の「凶作/豊作」判定とUI表示を常に一致させる。
+ */
+export type WeatherVisualCategory = "harsh" | "normal" | "bountiful";
+
+/** 天候係数からUI表示カテゴリを求める。 */
+export function weatherVisualCategory(weatherFactor: number): WeatherVisualCategory {
+  if (weatherFactor < POOR_HARVEST_THRESHOLD) return "harsh";
+  if (weatherFactor > BUMPER_HARVEST_THRESHOLD) return "bountiful";
+  return "normal";
+}

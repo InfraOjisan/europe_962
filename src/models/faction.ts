@@ -36,6 +36,14 @@ export interface Faction {
   readonly treasury: number;
   readonly diplomacy: DiplomacyTable;
 
+  /**
+   * 宗主（設計書 5.4 / 6.2章）。`diplomacy` の `"vassal"` は対称な状態表現のため、
+   * どちらが宗主でどちらが臣下かを示せない。この勢力が誰かの臣下である場合のみ
+   * その宗主の FactionId を持つ（自身が独立している、または他者の宗主である場合は null）。
+   * `captivity.ts` の `forceVassalization` が設定する。プレイヤーのゲームオーバー判定にも使う。
+   */
+  readonly suzerain: FactionId | null;
+
   readonly alive: boolean;
 }
 

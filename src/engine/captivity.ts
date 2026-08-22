@@ -143,7 +143,11 @@ export function canForceSubjugation(state: GameState, captorFactionId: FactionId
   return rulerCaptive && heirCaptive;
 }
 
-/** 傀儡化を強制する（設計書 5.4）。`canForceSubjugation` の成立を前提とする。 */
+/**
+ * 傀儡化を強制する（設計書 5.4）。`canForceSubjugation` の成立を前提とする。
+ * `diplomacy` の `"vassal"` マーカーは両勢力に対称に立てる（互いを "vassal" 関係と認識させる）が、
+ * どちらが宗主かは `suzerain` フィールド（設計書 6.2）で一意に記録する。
+ */
 export function forceVassalization(state: GameState, captorFactionId: FactionId, targetFactionId: FactionId): GameState {
   if (!canForceSubjugation(state, captorFactionId, targetFactionId)) return state;
   const target = state.factions[targetFactionId]!;
@@ -154,7 +158,11 @@ export function forceVassalization(state: GameState, captorFactionId: FactionId,
     ...state,
     factions: {
       ...state.factions,
-      [targetFactionId]: { ...target, diplomacy: { ...target.diplomacy, [captorFactionId]: "vassal" } },
+      [targetFactionId]: {
+        ...target,
+        diplomacy: { ...target.diplomacy, [captorFactionId]: "vassal" },
+        suzerain: captorFactionId,
+      },
       [captorFactionId]: { ...captor, diplomacy: { ...captor.diplomacy, [targetFactionId]: "vassal" } },
     },
   };

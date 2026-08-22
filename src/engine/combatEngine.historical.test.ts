@@ -44,6 +44,7 @@ function makeRegion(over: Partial<Region> & Pick<Region, "id" | "owner">): Regio
     adjacency: [],
     fortified: false,
     siege: null,
+    frontier: false,
     ...over,
   };
 }

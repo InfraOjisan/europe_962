@@ -5,7 +5,15 @@ import type { Character } from "../models/character.js";
 import type { Faction } from "../models/faction.js";
 import type { GameState } from "../models/gameState.js";
 import type { Region } from "../models/region.js";
-import { advanceYear, detectFlanking, detectSurprise, findMostConsequentialHostilePair, runPhase } from "./turnEngine.js";
+import {
+  advanceYear,
+  detectFlanking,
+  detectSurprise,
+  findMostConsequentialHostilePair,
+  runAction,
+  runDiplomacy,
+  runPhase,
+} from "./turnEngine.js";
 import { createInitialGameState } from "../data/initialState.js";
 import { validateGameState } from "../utils/validation.js";
 
@@ -37,6 +45,7 @@ function makeFaction(over: Partial<Faction> & Pick<Faction, "id" | "name" | "rul
     regions: [],
     treasury: 1000,
     diplomacy: {},
+    suzerain: null,
     alive: true,
     ...over,
   };
@@ -54,6 +63,7 @@ function makeRegion(over: Partial<Region> & Pick<Region, "id" | "owner">): Regio
     adjacency: [],
     fortified: false,
     siege: null,
+    frontier: false,
     ...over,
   };
 }
@@ -134,8 +144,10 @@ describe("戦闘解決フェイズの統合", () => {
       },
       captivities: {},
       greatWarTriggered: false,
-    };
-    return state;
+      playerFactionId: null,
+      spectator: null,
+      };
+          return state;
   }
 
   it("同一州の敵対軍を解決し、占領・捕虜登録・年末フェイズへの遷移を行う", () => {
@@ -180,8 +192,9 @@ describe("後継者危機の統合", () => {
       characters: { [ruler.id]: ruler },
       captivities: {},
       greatWarTriggered: false,
-    };
-
+      playerFactionId: null,
+      spectator: null,
+      };
     const next = runPhase(state); // year_start
     expect(next.phase).toBe("diplomacy");
     expect(next.factions[factionId]?.alive).toBe(false); // claimant不在で無主化
@@ -209,8 +222,9 @@ describe("後継者危機の統合", () => {
       characters: { [ruler.id]: ruler, [child.id]: child },
       captivities: {},
       greatWarTriggered: false,
-    };
-
+      playerFactionId: null,
+      spectator: null,
+      };
     const next = runPhase(state);
     expect(next.factions[factionId]?.ruler).toBe(child.id);
     expect(next.characters[child.id]?.role).toBe("ruler");
@@ -236,8 +250,9 @@ describe("大戦発生時の停止", () => {
       characters: {},
       captivities: {},
       greatWarTriggered: false,
-    };
-
+      playerFactionId: null,
+      spectator: null,
+      };
     const next = runPhase(state); // year_end
     expect(next.greatWarTriggered).toBe(true);
     expect(next.year).toBe(972); // 年は進まない
@@ -281,8 +296,9 @@ describe("多重戦闘・奇襲・挟撃の判定（設計書 3.7）", () => {
         characters: {},
         captivities: {},
         greatWarTriggered: false,
-      };
-
+        playerFactionId: null,
+        spectator: null,
+        };
       const small = army({ id: asArmyId("small_a"), faction: factionA, units: [{ type: "infantry", count: 100, training: 0.3 }] });
       const big = army({ id: asArmyId("big_b"), faction: factionB, units: [{ type: "infantry", count: 9000, training: 0.8 }] });
       const medium = army({ id: asArmyId("medium_c"), faction: factionC, units: [{ type: "infantry", count: 3000, training: 0.6 }] });
@@ -307,8 +323,10 @@ describe("多重戦闘・奇襲・挟撃の判定（設計書 3.7）", () => {
         characters: {},
         captivities: {},
         greatWarTriggered: false,
-      };
-      const a = army({ id: asArmyId("a"), faction: factionA });
+        playerFactionId: null,
+        spectator: null,
+        };
+              const a = army({ id: asArmyId("a"), faction: factionA });
       const b = army({ id: asArmyId("b"), faction: factionB });
       expect(findMostConsequentialHostilePair([a, b], state)).toBeNull();
     });
@@ -335,8 +353,10 @@ describe("多重戦闘・奇襲・挟撃の判定（設計書 3.7）", () => {
         characters: { [skilledCommander.id]: skilledCommander },
         captivities: {},
         greatWarTriggered: false,
-      };
-      expect(detectSurprise(factionA, region, state)).toBe(true);
+        playerFactionId: null,
+        spectator: null,
+        };
+              expect(detectSurprise(factionA, region, state)).toBe(true);
     });
 
     it("指揮官の能力が閾値未満なら奇襲不成立", () => {
@@ -357,8 +377,10 @@ describe("多重戦闘・奇襲・挟撃の判定（設計書 3.7）", () => {
         characters: { [weakCommander.id]: weakCommander },
         captivities: {},
         greatWarTriggered: false,
-      };
-      expect(detectSurprise(factionA, region, state)).toBe(false);
+        playerFactionId: null,
+        spectator: null,
+        };
+              expect(detectSurprise(factionA, region, state)).toBe(false);
     });
 
     it("隣接州に自軍がいなければ奇襲不成立", () => {
@@ -372,8 +394,10 @@ describe("多重戦闘・奇襲・挟撃の判定（設計書 3.7）", () => {
         characters: {},
         captivities: {},
         greatWarTriggered: false,
-      };
-      expect(detectSurprise(factionA, region, state)).toBe(false);
+        playerFactionId: null,
+        spectator: null,
+        };
+              expect(detectSurprise(factionA, region, state)).toBe(false);
     });
   });
 
@@ -393,8 +417,10 @@ describe("多重戦闘・奇襲・挟撃の判定（設計書 3.7）", () => {
         characters: {},
         captivities: {},
         greatWarTriggered: false,
-      };
-      expect(detectFlanking(factionA, main.id, region, state)).toBe(true);
+        playerFactionId: null,
+        spectator: null,
+        };
+              expect(detectFlanking(factionA, main.id, region, state)).toBe(true);
     });
 
     it("自軍がその1隊のみなら挟撃不成立", () => {
@@ -409,8 +435,10 @@ describe("多重戦闘・奇襲・挟撃の判定（設計書 3.7）", () => {
         characters: {},
         captivities: {},
         greatWarTriggered: false,
-      };
-      expect(detectFlanking(factionA, main.id, region, state)).toBe(false);
+        playerFactionId: null,
+        spectator: null,
+        };
+              expect(detectFlanking(factionA, main.id, region, state)).toBe(false);
     });
   });
 
@@ -444,8 +472,9 @@ describe("多重戦闘・奇襲・挟撃の判定（設計書 3.7）", () => {
       characters: {},
       captivities: {},
       greatWarTriggered: false,
-    };
-
+      playerFactionId: null,
+      spectator: null,
+      };
     const next = runPhase(state); // battle_resolution
 
     // 圧倒的に強い B が、A・C の双方との戦闘を同一ターン内に解決し、両方を打ち破る。
@@ -454,5 +483,193 @@ describe("多重戦闘・奇襲・挟撃の判定（設計書 3.7）", () => {
     expect(remainingFactions.has(factionA)).toBe(false);
     expect(remainingFactions.has(factionC)).toBe(false);
     expect(validateGameState(next).issues).toEqual([]);
+  });
+});
+
+describe("外交フェイズへのAI接続（設計書 9.4）", () => {
+  const strongId = asFactionId("faction_strong");
+  const weakId = asFactionId("faction_weak");
+
+  function twoFactionPeaceState(strongRulerOver: Partial<Character> = {}): GameState {
+    const strongRuler = makeCharacter({
+      id: asCharacterId("strong_ruler"),
+      name: "強国の君主",
+      faction: strongId,
+      policy: "expansionism",
+      ...strongRulerOver,
+    });
+    const weakRuler = makeCharacter({ id: asCharacterId("weak_ruler"), name: "弱国の君主", faction: weakId, policy: "self_preservation" });
+
+    const strongRegion = makeRegion({
+      id: asRegionId("r_strong"),
+      owner: strongId,
+      garrison: { count: 10_000, training: 0.9 },
+    });
+    const weakRegion = makeRegion({
+      id: asRegionId("r_weak"),
+      owner: weakId,
+      garrison: { count: 100, training: 0.3 },
+    });
+
+    const strongFaction = makeFaction({
+      id: strongId,
+      name: "強国",
+      ruler: strongRuler.id,
+      regions: [strongRegion.id],
+      diplomacy: { [weakId]: "peace" },
+    });
+    const weakFaction = makeFaction({
+      id: weakId,
+      name: "弱国",
+      ruler: weakRuler.id,
+      regions: [weakRegion.id],
+      diplomacy: { [strongId]: "peace" },
+    });
+    // 大戦誤爆防止用の中立勢力（生存4勢力中2勢力の開戦＝war_ratio 50%に留め、
+    // 2/3の大戦閾値を超えないようにする。2〜3勢力だけだと即座に閾値を超えてしまうため）。
+    const neutral1 = makeFaction({ id: asFactionId("faction_neutral1"), name: "中立国1", ruler: null });
+    const neutral2 = makeFaction({ id: asFactionId("faction_neutral2"), name: "中立国2", ruler: null });
+
+    return {
+      turn: 1,
+      year: 1000,
+      phase: "diplomacy",
+      regions: { [strongRegion.id]: strongRegion, [weakRegion.id]: weakRegion },
+      factions: { [strongId]: strongFaction, [weakId]: weakFaction, [neutral1.id]: neutral1, [neutral2.id]: neutral2 },
+      armies: {},
+      characters: { [strongRuler.id]: strongRuler, [weakRuler.id]: weakRuler },
+      captivities: {},
+      greatWarTriggered: false,
+      playerFactionId: null,
+      spectator: null,
+    };
+  }
+
+  it("圧倒的に強い拡張主義の勢力は、弱小な隣国に宣戦布告する", () => {
+    const state = twoFactionPeaceState();
+    const next = runDiplomacy(state);
+
+    expect(next.factions[strongId]?.diplomacy[weakId]).toBe("war");
+    expect(next.factions[weakId]?.diplomacy[strongId]).toBe("war");
+    expect(next.phase).toBe("action");
+    expect(validateGameState(next).issues).toEqual([]);
+  });
+
+  it("プレイヤー勢力は自動的な外交判断の対象から除外される", () => {
+    const state = { ...twoFactionPeaceState(), playerFactionId: strongId };
+    const next = runDiplomacy(state);
+
+    // 強国（プレイヤー）が動かないため、外交状態は変化しない。
+    expect(next.factions[strongId]?.diplomacy[weakId]).toBe("peace");
+    expect(next.factions[weakId]?.diplomacy[strongId]).toBe("peace");
+  });
+
+  it("その一手が単独で大戦（世界のゲームオーバー）を引き起こす場合は見送る", () => {
+    // 生存4勢力中、既に2勢力（弱国・第三国）が戦争状態（war_ratio 50%）。
+    // ここで強国が弱国にも宣戦すると、戦争状態の勢力が3/4＝75%となり、
+    // 大戦の閾値（2/3）を単独で超えてしまう。
+    const thirdId = asFactionId("faction_third");
+    const thirdRuler = makeCharacter({ id: asCharacterId("third_ruler"), name: "第三国の君主", faction: thirdId });
+    const thirdFaction = makeFaction({ id: thirdId, name: "第三国", ruler: thirdRuler.id, diplomacy: { [weakId]: "war" } });
+
+    const base = twoFactionPeaceState();
+    const weakWithThirdWar = {
+      ...base.factions[weakId]!,
+      diplomacy: { ...base.factions[weakId]!.diplomacy, [thirdId]: "war" as const },
+    };
+    // twoFactionPeaceState の中立勢力を1つに絞り、生存勢力数を4に固定する
+    // （war_ratio の分母をこのテストの意図どおりに保つため）。
+    const { [asFactionId("faction_neutral2")]: _removedNeutral2, ...factionsWithoutNeutral2 } = base.factions;
+
+    const state: GameState = {
+      ...base,
+      factions: { ...factionsWithoutNeutral2, [weakId]: weakWithThirdWar, [thirdId]: thirdFaction },
+      characters: { ...base.characters, [thirdRuler.id]: thirdRuler },
+    };
+
+    const next = runDiplomacy(state);
+
+    // 強国は「弱国へ宣戦する」を選びたいはずだが、大戦を単独で引き起こすため見送られる。
+    expect(next.factions[strongId]?.diplomacy[weakId]).toBe("peace");
+    expect(next.greatWarTriggered).toBe(false);
+  });
+});
+
+describe("行動フェイズへのAI接続（設計書 9.4）", () => {
+  const attackerId = asFactionId("faction_attacker");
+  const defenderId = asFactionId("faction_defender");
+  const homeId = asRegionId("r_home");
+  const targetId = asRegionId("r_target");
+
+  function warState(): GameState {
+    const commander = makeCharacter({
+      id: asCharacterId("commander"),
+      name: "指揮官",
+      faction: attackerId,
+      role: "warlord",
+      policy: "expansionism",
+      skills: { command: 0.8, diplomacy: 0.2, administration: 0.2 },
+    });
+    const homeRegion = makeRegion({ id: homeId, owner: attackerId, adjacency: [targetId] });
+    const targetRegion = makeRegion({
+      id: targetId,
+      owner: defenderId,
+      adjacency: [homeId],
+      garrison: { count: 50, training: 0.2 },
+    });
+    const attackerFaction = makeFaction({
+      id: attackerId,
+      name: "攻め手",
+      ruler: null,
+      regions: [homeId],
+      warlords: [commander.id],
+      diplomacy: { [defenderId]: "war" },
+    });
+    const defenderFaction = makeFaction({
+      id: defenderId,
+      name: "受け手",
+      ruler: null,
+      regions: [targetId],
+      diplomacy: { [attackerId]: "war" },
+    });
+    const attackerArmy: Army = {
+      id: asArmyId("army_attacker"),
+      faction: attackerId,
+      commander: commander.id,
+      location: homeId,
+      units: [{ type: "infantry", count: 5000, training: 0.8 }],
+      doctrine: "default",
+      morale: 0.9,
+      supply: 1.0,
+    };
+
+    return {
+      turn: 1,
+      year: 1000,
+      phase: "action",
+      regions: { [homeId]: homeRegion, [targetId]: targetRegion },
+      factions: { [attackerId]: attackerFaction, [defenderId]: defenderFaction },
+      armies: { [attackerArmy.id]: attackerArmy },
+      characters: { [commander.id]: commander },
+      captivities: {},
+      greatWarTriggered: false,
+      playerFactionId: null,
+      spectator: null,
+    };
+  }
+
+  it("優勢な軍団は、隣接する敵地へ侵攻する（州の移動）", () => {
+    const state = warState();
+    const next = runAction(state);
+
+    expect(next.armies[asArmyId("army_attacker")]?.location).toBe(targetId);
+    expect(next.phase).toBe("battle_resolution");
+  });
+
+  it("プレイヤー勢力の軍団は自動移動の対象外", () => {
+    const state = { ...warState(), playerFactionId: attackerId };
+    const next = runAction(state);
+
+    expect(next.armies[asArmyId("army_attacker")]?.location).toBe(homeId);
   });
 });

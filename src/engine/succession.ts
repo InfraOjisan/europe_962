@@ -268,6 +268,7 @@ export function spawnCivilWarFactions(state: GameState, originalFactionId: Facti
       regions: [],
       treasury: Math.floor(original.treasury / claimants.length),
       diplomacy: {},
+      suzerain: null,
       alive: true,
     };
   });

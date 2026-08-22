@@ -50,6 +50,16 @@ export interface DecisionContext {
   readonly actorRole: string;
   /** 状況の要約（例：「劣勢の会戦で、退路が塞がれつつある」）。 */
   readonly summary: string;
+  /**
+   * 大戦（世界同時多発戦争によるゲームオーバー）への近さ（0〜1、`warCheck.ts` の
+   * `greatWarProximity` で算出）。生成AI丸投げ方式に必ず渡す前提の値
+   * （ユーザー要望：「世界のゲームオーバーは必ずAIへの丸投げ時は前提に入れる」）。
+   * 点数判断（`decideByScoring`）自体はこの値を直接参照しないが、呼び出し側
+   * （`turnEngine.ts` の外交フェイズ）が選択肢のスコアを組み立てる際にこの値を
+   * 織り込む（戦争継続・宣戦オプションの safety を下げる等）ことで、
+   * 両方式で大戦回避バイアスが一貫して働くようにする。
+   */
+  readonly greatWarProximity: number;
 }
 
 type PolicyWeights = Readonly<Record<"safety" | "expansion" | "profit" | "legitimacy", number>>;

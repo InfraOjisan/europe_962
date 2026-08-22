@@ -42,6 +42,7 @@ function makeFaction(over: Partial<Faction> & Pick<Faction, "id" | "name" | "rul
     regions: [],
     treasury: 1000,
     diplomacy: {},
+    suzerain: null,
     alive: true,
     ...over,
   };
@@ -58,8 +59,9 @@ function makeState(factions: readonly Faction[], characters: readonly Character[
     characters: Object.fromEntries(characters.map((c) => [c.id, c])),
     captivities: {},
     greatWarTriggered: false,
-  };
-}
+    playerFactionId: null,
+    spectator: null,
+    };}
 
 describe("後継指定・養子縁組", () => {
   it("後継候補が一人もいない場合のみ canAdopt が true", () => {
@@ -300,6 +302,7 @@ describe("spawnCivilWarFactions", () => {
           adjacency: [],
           fortified: false,
           siege: null,
+          frontier: false,
         },
         [r2]: {
           id: r2,
@@ -314,6 +317,7 @@ describe("spawnCivilWarFactions", () => {
           adjacency: [],
           fortified: false,
           siege: null,
+          frontier: false,
         },
       },
     };

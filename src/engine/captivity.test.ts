@@ -46,6 +46,7 @@ function makeFaction(over: Partial<Faction> & Pick<Faction, "id" | "name" | "rul
     regions: [],
     treasury: 1000,
     diplomacy: {},
+    suzerain: null,
     alive: true,
     ...over,
   };
@@ -65,6 +66,7 @@ function makeRegion(id: ReturnType<typeof asRegionId>, owner: ReturnType<typeof 
     adjacency: [],
     fortified: false,
     siege: null,
+    frontier: false,
   };
 }
 
@@ -79,8 +81,9 @@ function makeState(factions: readonly Faction[], characters: readonly Character[
     characters: Object.fromEntries(characters.map((c) => [c.id, c])),
     captivities: {},
     greatWarTriggered: false,
-  };
-}
+    playerFactionId: null,
+    spectator: null,
+    };}
 
 describe("registerCapture", () => {
   const attackerFaction = asFactionId("faction_attacker");

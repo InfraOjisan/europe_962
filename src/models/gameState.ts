@@ -17,6 +17,21 @@ export type TurnPhase =
   | "year_end"; // ⑤ 年末集計フェイズ
 
 /**
+ * 傍観モード（設計書 6.2）。プレイヤーの勢力が降伏・臣従・併合によって独立行動できなく
+ * なった際、そのまま終了する代わりに吸収先／宗主勢力の視点で歴史を見続けられる。
+ */
+export interface SpectatorState {
+  /** 傍観の視点を借りている勢力（併合先、または宗主）。 */
+  readonly hostFactionId: FactionId;
+  /** 傍観に入った経緯。 */
+  readonly reason: "surrender" | "vassalized" | "annexed";
+  /** 傍観を開始した西暦年（UI表示・再起チャンス演出用）。 */
+  readonly since: number;
+  /** 傍観の起点になった、プレイヤーの元の勢力（併合等で消滅していても記録として残す）。 */
+  readonly originalFactionId: FactionId;
+}
+
+/**
  * ゲーム全体の状態スナップショット。セーブデータの単位でもある。
  * 各エンティティは Map ではなく Record で保持し、そのまま JSON にシリアライズできるようにする。
  */
@@ -32,4 +47,11 @@ export interface GameState {
   readonly captivities: Readonly<Record<CharacterId, Captivity>>;
   /** 大戦発生によりゲームが終了しているか。 */
   readonly greatWarTriggered: boolean;
+  /**
+   * プレイヤーが操作している勢力（設計書 6.2）。null は「プレイヤー不在」＝AI同士のシミュレーション
+   * （テスト・観戦専用シナリオ等）を意味し、この場合 `runDiplomacy`/`runAction` は全勢力をAIが動かす。
+   */
+  readonly playerFactionId: FactionId | null;
+  /** 傍観モード中でなければ null。 */
+  readonly spectator: SpectatorState | null;
 }

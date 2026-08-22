@@ -3,9 +3,12 @@ import { asArmyId, asFactionId, asRegionId } from "../models/ids.js";
 import type { Region } from "../models/region.js";
 import {
   armyUpkeep,
+  BUMPER_HARVEST_THRESHOLD,
   calculateEffectiveTax,
   garrisonUpkeep,
+  POOR_HARVEST_THRESHOLD,
   rollWeatherFactor,
+  weatherVisualCategory,
   WAR_TAX_PENALTY,
   PLAGUE_TAX_PENALTY,
 } from "./economy.js";
@@ -24,6 +27,7 @@ function makeRegion(over: Partial<Region>): Region {
     adjacency: [],
     fortified: false,
     siege: null,
+    frontier: false,
     ...over,
   };
 }
@@ -100,5 +104,19 @@ describe("維持費", () => {
   it("armyUpkeep は兵科を問わず総兵数に比例する", () => {
     const upkeep = armyUpkeep({ units: [{ type: "infantry", count: 1000, training: 0.5 }, { type: "cavalry", count: 500, training: 0.6 }] });
     expect(upkeep).toBeCloseTo(1500 * 0.08, 5);
+  });
+});
+
+describe("weatherVisualCategory（UI表示カテゴリ、設計書 7.7）", () => {
+  it("凶作しきい値未満は harsh", () => {
+    expect(weatherVisualCategory(POOR_HARVEST_THRESHOLD - 0.01)).toBe("harsh");
+  });
+
+  it("豊作しきい値超は bountiful", () => {
+    expect(weatherVisualCategory(BUMPER_HARVEST_THRESHOLD + 0.01)).toBe("bountiful");
+  });
+
+  it("しきい値の間は normal", () => {
+    expect(weatherVisualCategory(1.0)).toBe("normal");
   });
 });

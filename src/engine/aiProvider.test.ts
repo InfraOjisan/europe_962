@@ -4,7 +4,11 @@ import { decideByScoring } from "./aiPolicy.js";
 import type { MinimalFetchResponse } from "./aiProvider.js";
 import { buildDecisionPrompt, decideAction, decideByLLM, resolveProviderConfig } from "./aiProvider.js";
 
-const context: DecisionContext = { actorRole: "戦闘隊長", summary: "劣勢の会戦で、退路が塞がれつつある" };
+const context: DecisionContext = {
+  actorRole: "戦闘隊長",
+  summary: "劣勢の会戦で、退路が塞がれつつある",
+  greatWarProximity: 0.2,
+};
 const options: readonly DecisionOption[] = [
   { label: "A", description: "踏みとどまって戦う", safety: 0.1, expansion: 0.2, profit: 0, legitimacy: 0.6 },
   { label: "B", description: "退却路を強行突破する", safety: 0.7, expansion: 0, profit: 0, legitimacy: 0.1 },

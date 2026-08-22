@@ -10,31 +10,34 @@
 ## データモデル・ゲームエンジン（TypeScript実装）
 
 `src/` に、概要設計書のデータモデル（Region / Faction / Army / Character /
-Captivity / GameState）と、大戦判定・戦闘解決・継承・捕虜/人質・AI意思決定・経済・
-史実イベント・ターン進行の各エンジンを実装している。`advanceYear()` でサンプル初期
-データを実際に1年ずつ進められる（AIは外交・行動フェイズにはまだ未接続、詳細は
-`docs/gamesystem_design.md` 9章・12章）。
+Captivity / GameState）と、大戦・プレイヤーのゲームオーバー判定・戦闘解決・継承・
+捕虜/人質・AI意思決定・経済・史実イベント・版図外勢力・ターン進行の各エンジンを実装している。
+`advanceYear()` でサンプル初期データを実際に1年ずつ進められ、外交・行動フェイズも
+AI（点数判断、既定）が実際に動かす（詳細は `docs/gamesystem_design.md` 13章）。
 
 ```
 src/
   models/     # Region, Faction, Army, Character, Captivity, GameState, Policy,
               # RegionArchetype などの型定義
   engine/
-    warCheck.ts          # 大戦判定（実装済み）
+    warCheck.ts          # 大戦判定・大戦への近さ（実装済み）
     combatEngine.ts      # 戦闘解決（史実シナリオで検証済み。係数は継続チューニング対象）
     causalityGuard.ts    # 因果律の保護（史実の転換点を演算の外側から補正する最終手段）
     kinship.ts            # 親等計算（血族ネットワークのBFS距離、実装済み）
     succession.ts          # 継承・養子縁組・後継者危機/内乱（係数は継続チューニング対象）
     captivity.ts            # 捕虜・人質・身代金・併合/傀儡化の強制（同上）
-    aiPolicy.ts               # AI意思決定：点数判断（Policy別の重み付けスコアリング、実装済み）
-    aiProvider.ts              # AI意思決定：生成AI丸投げ（OpenAI互換API、失敗時は点数判断へ自動フォールバック）
-    economy.ts                  # 経済：地勢アーキタイプ別の税率・天候（正規分布）・戦争/疫病補正
-    eventEngine.ts                # 史実イベント年表の適用（データは data/historicalEvents.ts）
-    turnEngine.ts                  # 5フェイズのターン進行（TurnFSM）を実際に回すオーケストレーション層。
-                                    # 多重戦闘・奇襲・挟撃の判定もここに実装
+    playerGameOver.ts        # プレイヤーのゲームオーバー：降伏/臣従（傍観・再起チャンス）/滅亡（血縁再起）
+    offMapThreats.ts          # 版図外勢力（モンゴル・ティムール・オスマン＝ペルシャ）の天災的襲来判定
+    aiPolicy.ts                 # AI意思決定：点数判断（Policy別の重み付けスコアリング、実装済み）
+    aiProvider.ts                # AI意思決定：生成AI丸投げ（OpenAI互換API、失敗時は点数判断へ自動フォールバック）
+    economy.ts                    # 経済：地勢アーキタイプ別の税率・天候（正規分布）・戦争/疫病補正
+    eventEngine.ts                  # 史実イベント年表の適用（データは data/historicalEvents.ts）
+    turnEngine.ts                    # 5フェイズのターン進行（TurnFSM）を実際に回すオーケストレーション層。
+                                      # 外交・行動フェイズのAI接続、多重戦闘・奇襲・挟撃の判定もここに実装
   data/
     initialState.ts   # 962年開始時点のサンプル初期データ
     historicalEvents.ts # 中学校社会科レベルの世界史年表イベント（1054〜1799年）
+    offMapThreats.ts    # 版図外勢力の史実データ（マジャール人〜オスマン＝サファヴィー、962〜1639年）
   utils/      # GameState の参照整合性バリデーション
 ```
 
@@ -44,10 +47,15 @@ src/
 それでも説明できない事象は演算の外側で強制イベント（因果律の保護、`causalityGuard.ts`）
 として補正する」検証プロセスを回しながら調整していく対象。
 
-AI意思決定（`aiPolicy.ts`/`aiProvider.ts`）と経済・史実イベントのエンジン自体は実装済みだが、
-`turnEngine.ts` の外交・行動フェイズはまだそれらを呼び出さないスタブ（次の実装対象）。
-生成AI丸投げ方式は既定でOpenAI API（`OPENAI_API_KEY` 環境変数、モデルは `gpt-4o`）を使い、
-`AIProviderConfig` で任意のOpenAI互換エンドポイント／キー／モデルに差し替えられる。
+AI意思決定（`aiPolicy.ts`/`aiProvider.ts`）は `turnEngine.ts` の外交・行動フェイズに
+接続済み。既定では点数判断（`decideByScoring`、ネットワーク不要・決定的）のみで
+全AI勢力（`GameState.playerFactionId` を除く）を動かし、生成AI丸投げ方式は
+`runDiplomacyAsync`/`runActionAsync` として同じ選択肢構築ロジックを共有する非同期版で
+別途提供する（"major decision" 局面での任意のオプトイン利用を想定。詳細は
+`docs/gamesystem_design.md` 13章）。生成AI丸投げ方式は既定でOpenAI API
+（`OPENAI_API_KEY` 環境変数、モデルは `gpt-4o`）を使い、`AIProviderConfig` で任意の
+OpenAI互換エンドポイント／キー／モデルに差し替えられる。意思決定には常に「大戦への近さ」
+（`warCheck.ts` の `greatWarProximity`）を織り込む。
 
 ### セットアップ・実行
 

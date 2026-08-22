@@ -65,9 +65,14 @@ export function buildDecisionPrompt(
   const optionLines = options.map((o) => `${o.label}. ${o.description}`).join("\n");
   const system =
     "あなたは中世〜近世ヨーロッパを舞台にした歴史シミュレーションゲームの登場人物の行動を判断するアシスタントです。" +
-    "与えられた状況と人物像から、最もふさわしい行動を1つだけ選んでください。";
+    "与えられた状況と人物像から、最もふさわしい行動を1つだけ選んでください。" +
+    "この世界では、生存する全勢力の2/3以上が同時に戦争状態になると「大戦」が起こり、" +
+    "参戦の有無に関わらず全ての勢力が敗北してゲームが終わる。世界情勢の欄で示される大戦への" +
+    "近さを踏まえ、無闇な開戦がその破局を早めることも考慮して判断すること。";
+  const worldSituation = `世界情勢: 大戦（世界同時多発戦争によるゲームオーバー）への近さ = ${Math.round(context.greatWarProximity * 100)}%`;
   const user =
     `${policyDescription(policy)}${context.actorRole}が、次の状況に置かれています。\n\n` +
+    `${worldSituation}\n` +
     `状況: ${context.summary}\n\n` +
     `選択肢:\n${optionLines}\n\n` +
     `最も妥当な行動を1つ選び、対応する記号のみを1文字で回答してください（説明は不要です）。`;
