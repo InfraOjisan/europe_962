@@ -121,6 +121,30 @@ app.post("/api/reset", (_req, res) => {
   res.json(serializeState(state));
 });
 
+/**
+ * 操作勢力の選択・変更（設計書 6.2 の playerFactionId）。
+ * factionId に null を渡すと「観戦のみ（CPU完全おまかせ）」モードに戻る
+ * ——全勢力をAIが動かす、これまでの既定の挙動。
+ *
+ * 注意：現時点ではプレイヤー専用の外交・軍事コマンドはまだ実装していない。
+ * 操作勢力に選ばれた勢力は、AI自動判断の対象から除外される（turnEngine.ts の
+ * runDiplomacy/runAction が playerFactionId を常にスキップする）ため、
+ * 明示的なコマンドを送らない限り何もしない（他勢力からの宣戦・侵攻は通常どおり発生する）。
+ */
+app.post("/api/select-faction", (req, res) => {
+  const factionId = req.body?.factionId ?? null;
+  if (factionId === null) {
+    state = { ...state, playerFactionId: null };
+    return res.json(serializeState(state));
+  }
+  const faction = state.factions[factionId];
+  if (!faction || faction.type !== "lord" || !faction.alive) {
+    return res.status(400).json({ error: `選択できない勢力です: ${factionId}` });
+  }
+  state = { ...state, playerFactionId: factionId };
+  res.json(serializeState(state));
+});
+
 app.post("/api/advance-year", async (req, res) => {
   const useAI = Boolean(req.body?.useAI);
   const before = state;

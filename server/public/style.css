@@ -49,6 +49,46 @@ html, body {
 }
 .gameover-banner.hidden { display: none; }
 
+.frozen-note {
+  padding: 8px 24px; background: #e3d4ad; color: #6b5738; font-size: 12.5px; text-align: center;
+  border-bottom: 1px solid #c3ac7c;
+}
+.frozen-note.hidden { display: none; }
+
+.player-indicator {
+  display: flex; align-items: center; gap: 8px; font-size: 13px; color: #5c4a2e;
+  background: #ddc99a; border: 1px solid #b79b6b; border-radius: 8px; padding: 6px 10px;
+}
+.player-indicator-label { color: #6b5738; }
+#player-indicator-name { font-weight: 600; }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(58, 42, 26, 0.55);
+  display: flex; align-items: center; justify-content: center; z-index: 50;
+}
+.modal-overlay.hidden { display: none; }
+.modal {
+  width: min(560px, 92vw); max-height: 82vh; overflow-y: auto;
+  background: #f4ead2; border: 2px solid #8a6a3f; border-radius: 12px; padding: 22px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+}
+.modal-title { font-family: "Cinzel", Georgia, serif; font-size: 18px; margin-bottom: 10px; }
+.modal-desc { font-size: 13px; color: #5c4a2e; line-height: 1.6; margin-bottom: 16px; }
+.faction-picker-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+.faction-picker-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  border: 1px solid #c3ac7c; border-radius: 8px; padding: 10px 12px; background: #f8f1de;
+}
+.faction-picker-item .fp-name { font-weight: 600; font-size: 14px; }
+.faction-picker-item .fp-meta { font-size: 11.5px; color: #6b5738; }
+.modal-actions { display: flex; justify-content: flex-end; }
+
+.faction-card.is-player { border: 2px solid #7c2222; box-shadow: 0 0 0 1px #7c2222 inset; }
+.your-faction-badge {
+  background: #7c2222; color: #fbf3df; font-size: 10px; padding: 1px 6px; border-radius: 3px; margin-left: 6px;
+}
+
 .body-row {
   display: grid;
   grid-template-columns: 2fr 1.4fr 1.2fr;
