@@ -1,9 +1,10 @@
 import { effectiveStrength, totalTroops, type Army } from "../models/army.js";
 import type { CasualtyReport } from "../models/battle.js";
+import type { Campaign } from "../models/campaign.js";
 import { isAtWar, type DiplomaticStance, type Faction } from "../models/faction.js";
-import { asArmyId } from "../models/ids.js";
+import { asArmyId, asFactionId } from "../models/ids.js";
 import type { FactionId, GameState, Policy, Region, RegionId, TurnPhase } from "../models/index.js";
-import type { DecisionContext, DecisionOption, RandomSource } from "./aiPolicy.js";
+import type { DecisionOption, RandomSource } from "./aiPolicy.js";
 import { decideByScoring, defaultRandomSource, scoreOption } from "./aiPolicy.js";
 import type { AIProviderConfig } from "./aiProvider.js";
 import { decideAction } from "./aiProvider.js";
@@ -514,6 +515,11 @@ function distantAllianceOption(threatName: string, candidateName: string): Decis
  * 明確な脅威となっている隣国（`findThreatNeighbor`）がいる場合、その脅威を挟んで
  * 反対側にいる勢力（`findSharedBorderFactions`）へ新たに同盟を持ちかける選択肢も
  * 候補に加える——遠くの勢力と結び、近くの脅威を包囲する動機を持たせる。
+ *
+ * `commitmentTargetId`（大国キャンペーンAI、下記参照）が指定されている場合、その相手との
+ * 関係が交戦中であれば「和平を申し入れる」選択肢を評価対象から外す——キャンペーンが
+ * annihilate フェイズにある間は、通常の点数判断で偶然「和平」が最高スコアになっても
+ * 妥協しないようにするため。
  */
 function pickBestDiplomaticMove(
   state: GameState,
@@ -521,6 +527,7 @@ function pickBestDiplomaticMove(
   policy: Policy,
   proximity: number,
   processedPairs: Set<string>,
+  commitmentTargetId: FactionId | null = null,
 ): DiplomaticMove | null {
   const self = state.factions[selfId];
   if (!self) return null;
@@ -532,7 +539,12 @@ function pickBestDiplomaticMove(
 
     const built = buildDiplomaticOptions(state, selfId, counterpartId, proximity);
     if (!built) continue;
-    const chosen = decideByScoring(policy, built.options);
+    const availableOptions =
+      commitmentTargetId !== null && counterpartId === commitmentTargetId && built.stance === "war"
+        ? built.options.filter((o) => o.label !== "B") // 「和平を申し入れる」を除外
+        : built.options;
+    if (availableOptions.length === 0) continue;
+    const chosen = decideByScoring(policy, availableOptions);
     const score = scoreOption(chosen, policy);
     if (!best || score > best.score) best = { kind: "adjust", counterpartId, stance: built.stance, option: chosen, score };
   }
@@ -572,30 +584,263 @@ function applyDiplomaticMove(factions: GameState["factions"], selfId: FactionId,
   return applyDiplomaticChoice(factions, selfId, move.counterpartId, move.stance, move.option.label);
 }
 
+// --- 大国キャンペーンAI（設計書 9.4／ユーザー要望） --------------------------
+//
+// 「序盤の淘汰の後は均衡状態に入ってしまう」というフィードバックに対応し、一部の
+// 有力勢力には単発の点数判断を超えた、複数ターンにまたがる長期的な野心を持たせる。
+// 対象は下記5大勢力のみ（全勢力に適用すると計算量・暴走リスクが跳ね上がるため）。
+// 962年開始時点ではハプスブルク家は未成立のため、史実でハプスブルク家が帝位を継ぐ
+// 神聖ローマ帝国（faction_hre）で代替する。
+//
+// 流れ：(1) 一定間隔で仮想敵国を選定 → (2) isolate フェイズで標的の隣国と同盟し
+// 標的を孤立させる（近攻遠交の応用）→ (3) 一定年数で annihilate フェイズへ移行し、
+// 宣戦布告・和平拒否・退路を断つ侵攻優先度（`buildActionOptions` 側）で標的を追い詰める
+// → (4) 標的が滅亡する（`eliminateFactionIfLandless`）か期限切れになったら終了し、
+// 次の標的探しに戻る。大戦回避の最終防波堤（`wouldSingleHandedlyTriggerGreatWar`）は
+// キャンペーン由来の一手にも例外なく適用される（無条件の暴走を防ぐ）。
+const GREAT_POWER_FACTION_IDS: readonly FactionId[] = [
+  asFactionId("faction_hre"), // ハプスブルク家（史実の帝位継承）の代替
+  asFactionId("faction_papal"),
+  asFactionId("faction_england"),
+  asFactionId("faction_west_francia"),
+  asFactionId("faction_brandenburg"),
+];
+
+/** 標的選定を再評価する間隔（年）。 */
+const CAMPAIGN_REEVALUATION_INTERVAL_YEARS = 20;
+/** isolate フェイズを続ける年数。これを超えると自動的に annihilate フェイズへ移行する。 */
+const CAMPAIGN_ISOLATE_PHASE_YEARS = 15;
+/** キャンペーンが長期化しすぎた場合の強制終了（安全弁、仮値）。 */
+const CAMPAIGN_MAX_DURATION_YEARS = 80;
+/** 標的として着手する最低条件（軍事力比・経済力比の平均、仮値）。優位が無ければ手を出さない。 */
+const CAMPAIGN_MIN_SUPERIORITY_RATIO = 1.2;
+/** 標的探索の射程（州の隣接グラフ上のホップ数、仮値）。行軍で実際に届く範囲に絞る。 */
+const CAMPAIGN_MAX_HOP_DISTANCE = 3;
+
+/** `state.campaigns` は後方互換のため任意フィールド。未設定は「キャンペーン無し」として読む。 */
+function getCampaigns(state: GameState): Readonly<Record<string, Campaign>> {
+  return state.campaigns ?? {};
+}
+
+function removeCampaign(campaigns: Readonly<Record<string, Campaign>>, factionId: FactionId): Readonly<Record<string, Campaign>> {
+  if (!(factionId in campaigns)) return campaigns;
+  const next = { ...campaigns };
+  delete next[factionId];
+  return next;
+}
+
+/** 勢力の経済力の簡易指標（国庫＋領有州の税基盤の合計）。真の成長率トレンドではなく現在値の比較に留める仮モデル。 */
+function factionEconomicStrength(state: GameState, factionId: FactionId): number {
+  const faction = state.factions[factionId];
+  if (!faction) return 0;
+  let strength = faction.treasury;
+  for (const regionId of faction.regions) {
+    const region = state.regions[regionId];
+    if (region) strength += region.taxBase;
+  }
+  return strength;
+}
+
+/** 複数の起点州から州の隣接グラフ上を幅優先探索し、到達可能な全ての州までのホップ数を求める。 */
+function regionHopDistances(state: GameState, sourceRegionIds: readonly RegionId[]): Map<RegionId, number> {
+  const distances = new Map<RegionId, number>();
+  let frontier: RegionId[] = [];
+  for (const id of sourceRegionIds) {
+    if (!distances.has(id)) {
+      distances.set(id, 0);
+      frontier.push(id);
+    }
+  }
+  let hop = 0;
+  while (frontier.length > 0) {
+    hop++;
+    const next: RegionId[] = [];
+    for (const id of frontier) {
+      const region = state.regions[id];
+      if (!region) continue;
+      for (const neighborId of region.adjacency) {
+        if (distances.has(neighborId)) continue;
+        distances.set(neighborId, hop);
+        next.push(neighborId);
+      }
+    }
+    frontier = next;
+  }
+  return distances;
+}
+
+/**
+ * 大国キャンペーンAIの次の標的を選ぶ。軍事力・経済力の双方で明確に優位
+ * （`CAMPAIGN_MIN_SUPERIORITY_RATIO` 以上）にあり、行軍で実際に届く範囲
+ * （`CAMPAIGN_MAX_HOP_DISTANCE` ホップ以内）にいる相手の中から、外交的に孤立していて
+ * （同盟数が少ない）近い（isolate・侵攻の労力が小さい）ほど高スコアとして最善の1件を選ぶ。
+ * 該当者がいなければ null（無理に手を出さない）。
+ */
+function selectCampaignTarget(state: GameState, selfId: FactionId): FactionId | null {
+  const self = state.factions[selfId];
+  if (!self || !self.alive || self.regions.length === 0) return null;
+
+  const distances = regionHopDistances(state, self.regions);
+  const selfMilitary = factionMilitaryStrength(state, selfId);
+  const selfEconomy = factionEconomicStrength(state, selfId);
+
+  let best: { id: FactionId; score: number } | null = null;
+  for (const candidate of Object.values(state.factions)) {
+    if (candidate.id === selfId || !candidate.alive || candidate.type !== "lord" || candidate.regions.length === 0) continue;
+    const stance = self.diplomacy[candidate.id];
+    if (stance === "alliance" || stance === "vassal") continue;
+
+    const hop = Math.min(...candidate.regions.map((r) => distances.get(r) ?? Number.POSITIVE_INFINITY));
+    if (!Number.isFinite(hop) || hop > CAMPAIGN_MAX_HOP_DISTANCE) continue;
+
+    const militaryRatio = selfMilitary / Math.max(1, factionMilitaryStrength(state, candidate.id));
+    const economicRatio = selfEconomy / Math.max(1, factionEconomicStrength(state, candidate.id));
+    const superiority = (militaryRatio + economicRatio) / 2;
+    if (superiority < CAMPAIGN_MIN_SUPERIORITY_RATIO) continue;
+
+    const allianceCount = Object.values(candidate.diplomacy).filter((s) => s === "alliance").length;
+    const isolationBonus = 1 / (1 + allianceCount);
+    const proximityBonus = 1 / hop;
+    const score = superiority * isolationBonus * proximityBonus;
+
+    if (!best || score > best.score) best = { id: candidate.id, score };
+  }
+  return best?.id ?? null;
+}
+
+/**
+ * 大国キャンペーンAIの状態を1年分進める：期限切れ・標的滅亡による終了、isolateからの
+ * フェイズ遷移、新規標的の選定（`CAMPAIGN_REEVALUATION_INTERVAL_YEARS` 年ごと）。
+ * `runDiplomacy`/`runDiplomacyAsync` の冒頭で呼び、以降はその年の間ずっと同じ
+ * `state.campaigns` を参照する。
+ */
+function advanceCampaigns(state: GameState): GameState {
+  let campaigns = getCampaigns(state);
+  let changed = false;
+
+  for (const greatPowerId of GREAT_POWER_FACTION_IDS) {
+    const faction = state.factions[greatPowerId];
+    if (!faction || !faction.alive) {
+      const cleared = removeCampaign(campaigns, greatPowerId);
+      if (cleared !== campaigns) {
+        campaigns = cleared;
+        changed = true;
+      }
+      continue;
+    }
+
+    const active = campaigns[greatPowerId];
+    if (active) {
+      const target = state.factions[active.targetFactionId];
+      const targetDead = !target || !target.alive;
+      const duration = state.year - active.startedYear;
+      if (targetDead || duration > CAMPAIGN_MAX_DURATION_YEARS) {
+        campaigns = removeCampaign(campaigns, greatPowerId);
+        changed = true;
+        continue;
+      }
+      if (active.phase === "isolate" && duration >= CAMPAIGN_ISOLATE_PHASE_YEARS) {
+        campaigns = { ...campaigns, [greatPowerId]: { ...active, phase: "annihilate" } };
+        changed = true;
+      }
+      continue;
+    }
+
+    if (state.year % CAMPAIGN_REEVALUATION_INTERVAL_YEARS !== 0) continue;
+    const targetId = selectCampaignTarget(state, greatPowerId);
+    if (targetId) {
+      campaigns = { ...campaigns, [greatPowerId]: { targetFactionId: targetId, phase: "isolate", startedYear: state.year } };
+      changed = true;
+    }
+  }
+
+  return changed ? { ...state, campaigns } : state;
+}
+
+/**
+ * 大国キャンペーンAIによる、通常の `pickBestDiplomaticMove` より優先される一手。
+ * null の場合はキャンペーンとして特に強制することが無い（通常の判断へフォールバック）。
+ *
+ * - isolate フェイズ：標的の隣国（`findSharedBorderFactions` を標的中心に流用）のうち、
+ *   まだ自分と同盟していない相手へ同盟を持ちかける（＝標的を外交的に孤立させる）。
+ * - annihilate フェイズ：まだ交戦していなければ即座に宣戦布告する。既に交戦中なら
+ *   ここでは何もしない（`runDiplomacy` 側で「和平を申し入れる」を選ばせない抑制を別途行う）。
+ */
+function campaignDiplomaticMove(
+  state: GameState,
+  selfId: FactionId,
+  campaign: Campaign,
+  processedPairs: Set<string>,
+): DiplomaticMove | null {
+  const self = state.factions[selfId];
+  const target = state.factions[campaign.targetFactionId];
+  if (!self || !target || !target.alive) return null;
+
+  if (campaign.phase === "annihilate") {
+    const stance = self.diplomacy[campaign.targetFactionId];
+    if (stance === "war" || stance === "vassal") return null;
+    const pairKey = [selfId, campaign.targetFactionId].sort().join("|");
+    if (processedPairs.has(pairKey)) return null;
+
+    const option: DecisionOption = {
+      label: "A",
+      description: `${target.name}を仮想敵国と定め、宣戦布告する（大国キャンペーン）`,
+      safety: 0.5,
+      expansion: 0.9,
+      profit: 0.3,
+      legitimacy: 0.15,
+    };
+    return { kind: "adjust", counterpartId: campaign.targetFactionId, stance: stance ?? "peace", option, score: 999 };
+  }
+
+  // isolate フェイズ：標的を挟んで反対側にいる勢力（＝標的の隣国）へ同盟を持ちかける。
+  for (const candidateId of findSharedBorderFactions(state, selfId, campaign.targetFactionId)) {
+    const pairKey = [selfId, candidateId].sort().join("|");
+    if (processedPairs.has(pairKey)) continue;
+    const candidateFaction = state.factions[candidateId];
+    if (!candidateFaction || !candidateFaction.alive || candidateFaction.type !== "lord") continue;
+    const existingStance = self.diplomacy[candidateId];
+    if (existingStance === "alliance" || existingStance === "vassal") continue;
+
+    const option = distantAllianceOption(target.name, candidateFaction.name);
+    return { kind: "new_alliance", counterpartId: candidateId, option, score: 999 };
+  }
+  return null;
+}
+
 /**
  * 外交フェイズ本体（同期・点数判断）。`Object.values` の列挙順で先に現れた勢力
  * （プレイヤー勢力は除外）から順に、`pickBestDiplomaticMove` で選んだ最善の1手だけを実行する。
+ *
+ * 冒頭で `advanceCampaigns` により大国キャンペーンAIの状態を更新し、5大勢力については
+ * `campaignDiplomaticMove` が返す一手（あれば）を通常の `pickBestDiplomaticMove` より
+ * 優先する。
  */
 export function runDiplomacy(state: GameState, _options: TurnEngineOptions = {}): GameState {
   const proximity = greatWarProximity(state);
-  let factions = state.factions;
+  const withCampaigns = advanceCampaigns(state);
+  let factions = withCampaigns.factions;
   const processedPairs = new Set<string>();
 
-  for (const self of Object.values(state.factions)) {
-    if (self.type !== "lord" || !self.alive || self.ruler === null || self.id === state.playerFactionId) continue;
-    const ruler = state.characters[self.ruler];
+  for (const self of Object.values(withCampaigns.factions)) {
+    if (self.type !== "lord" || !self.alive || self.ruler === null || self.id === withCampaigns.playerFactionId) continue;
+    const ruler = withCampaigns.characters[self.ruler];
     if (!ruler) continue;
 
-    const best = pickBestDiplomaticMove(state, self.id, ruler.policy, proximity, processedPairs);
+    const campaign = getCampaigns(withCampaigns)[self.id] ?? null;
+    const commitmentTargetId = campaign?.phase === "annihilate" ? campaign.targetFactionId : null;
+    const best =
+      (campaign && campaignDiplomaticMove(withCampaigns, self.id, campaign, processedPairs)) ??
+      pickBestDiplomaticMove(withCampaigns, self.id, ruler.policy, proximity, processedPairs, commitmentTargetId);
     if (!best) continue;
     processedPairs.add([self.id, best.counterpartId].sort().join("|"));
 
     const candidateFactions = applyDiplomaticMove(factions, self.id, best);
-    if (candidateFactions !== factions && wouldSingleHandedlyTriggerGreatWar(state, candidateFactions)) continue;
+    if (candidateFactions !== factions && wouldSingleHandedlyTriggerGreatWar(withCampaigns, candidateFactions)) continue;
     factions = candidateFactions;
   }
 
-  return { ...state, factions, phase: "action" };
+  return { ...withCampaigns, factions, phase: "action" };
 }
 
 /**
@@ -604,49 +849,80 @@ export function runDiplomacy(state: GameState, _options: TurnEngineOptions = {})
  * `decideAction`（LLM優先・失敗時は点数判断に自動フォールバック）に差し替える。
  * `DecisionContext.greatWarProximity` を必ず渡すため、生成AIの判断にも大戦接近度が
  * 常に反映される。
+ *
+ * ユーザー要望（ターン進行速度）：LLMへの問い合わせは `GREAT_POWER_FACTION_IDS`
+ * （5大勢力）のみに限定し、それ以外の勢力は（トグルがONでも）常に点数判断で高速に処理する。
+ * さらに5大勢力についても、大国キャンペーンAIが強制する一手（`campaignDiplomaticMove`）が
+ * あればLLMへの問い合わせ自体を省略する——キャンペーンの長期方針はLLMの応答ゆらぎに
+ * 左右されない決定論的なロジックであるべき、という設計判断（詳細は9.4章）。
  */
 export async function runDiplomacyAsync(
   state: GameState,
   aiConfig?: AIProviderConfig,
 ): Promise<GameState> {
   const proximity = greatWarProximity(state);
-  let factions = state.factions;
+  const withCampaigns = advanceCampaigns(state);
+  let factions = withCampaigns.factions;
   const processedPairs = new Set<string>();
 
-  for (const self of Object.values(state.factions)) {
-    if (self.type !== "lord" || !self.alive || self.ruler === null || self.id === state.playerFactionId) continue;
-    const ruler = state.characters[self.ruler];
+  for (const self of Object.values(withCampaigns.factions)) {
+    if (self.type !== "lord" || !self.alive || self.ruler === null || self.id === withCampaigns.playerFactionId) continue;
+    const ruler = withCampaigns.characters[self.ruler];
     if (!ruler) continue;
 
-    // runDiplomacy と同じく「1ターンにつき1手」に絞る。相手ごとに生成AIへ問い合わせ、
-    // 返ってきた選択肢群の中で最もスコアの高い1件だけを実行する。
+    const campaign = getCampaigns(withCampaigns)[self.id] ?? null;
+    const campaignMove = campaign ? campaignDiplomaticMove(withCampaigns, self.id, campaign, processedPairs) : null;
+    if (campaignMove) {
+      processedPairs.add([self.id, campaignMove.counterpartId].sort().join("|"));
+      const candidateFactions = applyDiplomaticMove(factions, self.id, campaignMove);
+      if (!(candidateFactions !== factions && wouldSingleHandedlyTriggerGreatWar(withCampaigns, candidateFactions))) {
+        factions = candidateFactions;
+      }
+      continue;
+    }
+    const commitmentTargetId = campaign?.phase === "annihilate" ? campaign.targetFactionId : null;
+    const isGreatPower = GREAT_POWER_FACTION_IDS.includes(self.id);
+
+    // runDiplomacy と同じく「1ターンにつき1手」に絞る。相手ごとに（5大勢力のみ）生成AIへ
+    // 問い合わせ、返ってきた選択肢群の中で最もスコアの高い1件だけを実行する。
     let best: DiplomaticMove | null = null;
     for (const counterpartId of Object.keys(self.diplomacy) as FactionId[]) {
       const pairKey = [self.id, counterpartId].sort().join("|");
       if (processedPairs.has(pairKey)) continue;
 
-      const built = buildDiplomaticOptions(state, self.id, counterpartId, proximity);
+      const built = buildDiplomaticOptions(withCampaigns, self.id, counterpartId, proximity);
       if (!built) continue;
-      const counterpart = state.factions[counterpartId]!;
-      const context: DecisionContext = {
-        actorRole: `${self.name}の君主`,
-        summary: `${counterpart.name}との関係は現在「${built.stance}」。${worldSituationSummary(proximity)}`,
-        greatWarProximity: proximity,
-      };
-      const chosen = await decideAction(context, built.options, ruler.policy, aiConfig);
+      const availableOptions =
+        commitmentTargetId !== null && counterpartId === commitmentTargetId && built.stance === "war"
+          ? built.options.filter((o) => o.label !== "B")
+          : built.options;
+      if (availableOptions.length === 0) continue;
+      const counterpart = withCampaigns.factions[counterpartId]!;
+      const chosen = isGreatPower
+        ? await decideAction(
+            {
+              actorRole: `${self.name}の君主`,
+              summary: `${counterpart.name}との関係は現在「${built.stance}」。${worldSituationSummary(proximity)}`,
+              greatWarProximity: proximity,
+            },
+            availableOptions,
+            ruler.policy,
+            aiConfig,
+          )
+        : decideByScoring(ruler.policy, availableOptions);
       const score = scoreOption(chosen, ruler.policy);
       if (!best || score > best.score) best = { kind: "adjust", counterpartId, stance: built.stance, option: chosen, score };
     }
 
     // 近攻遠交（runDiplomacy と同じロジックを共有）：LLMへの追加問い合わせはせず、
     // 点数判断でこの副次的な判断を行う（LLM呼び出し回数を抑えるため）。
-    const threat = findThreatNeighbor(state, self.id);
+    const threat = findThreatNeighbor(withCampaigns, self.id);
     if (threat) {
-      const threatFaction = state.factions[threat.threatId];
-      for (const candidateId of findSharedBorderFactions(state, self.id, threat.threatId)) {
+      const threatFaction = withCampaigns.factions[threat.threatId];
+      for (const candidateId of findSharedBorderFactions(withCampaigns, self.id, threat.threatId)) {
         const pairKey = [self.id, candidateId].sort().join("|");
         if (processedPairs.has(pairKey)) continue;
-        const candidateFaction = state.factions[candidateId];
+        const candidateFaction = withCampaigns.factions[candidateId];
         if (!candidateFaction || !candidateFaction.alive || candidateFaction.type !== "lord") continue;
         const existingStance = self.diplomacy[candidateId];
         if (existingStance === "alliance" || existingStance === "vassal") continue;
@@ -660,13 +936,13 @@ export async function runDiplomacyAsync(
     if (best) {
       processedPairs.add([self.id, best.counterpartId].sort().join("|"));
       const candidateFactions = applyDiplomaticMove(factions, self.id, best);
-      if (!(candidateFactions !== factions && wouldSingleHandedlyTriggerGreatWar(state, candidateFactions))) {
+      if (!(candidateFactions !== factions && wouldSingleHandedlyTriggerGreatWar(withCampaigns, candidateFactions))) {
         factions = candidateFactions;
       }
     }
   }
 
-  return { ...state, factions, phase: "action" };
+  return { ...withCampaigns, factions, phase: "action" };
 }
 
 // --- 行動フェイズ（軍団の移動・侵攻・退却・略奪） -----------------------------
@@ -719,6 +995,35 @@ function findMarchStepTowardFront(state: GameState, army: Army, selfFaction: Fac
   return null;
 }
 
+/** 傭兵団が「食い詰めて」略奪に転じる treasury のしきい値（軍団維持費のおよそ3年分、仮値）。 */
+const MERCENARY_STARVATION_UPKEEP_MULTIPLIER = 3;
+
+/**
+ * 傭兵団（`type: "mercenary"`）は課税対象の領地を持たないため、通常の勢力のような
+ * 恒常収入源（10.4章の税収）が無く、契約・略奪でしか国庫を維持できない（設計書 5.2章）。
+ * 契約（雇用交渉）のAI自動化はまだ未実装のため（12章）、現状は「一定以上の蓄えが無くなると
+ * 周辺を襲う」というフォールバックのみ実装する（ユーザー要望：放っておくと飢えて先細りする
+ * だけだった問題への対応）。
+ */
+function isMercenaryStarving(faction: Faction, army: Army): boolean {
+  if (faction.type !== "mercenary") return false;
+  return faction.treasury < armyUpkeep(army) * MERCENARY_STARVATION_UPKEEP_MULTIPLIER;
+}
+
+/**
+ * 大国キャンペーンAI（annihilate フェイズ、ユーザー要望「退路を塞いで滅亡までのシナリオ」）
+ * の侵攻優先度ボーナス：標的が領有する州のうち、標的自身の他の州との隣接が少ない
+ * （＝標的の版図の中でも周辺・孤立させやすい）ものほど高いボーナスを返す。侵攻選択肢の
+ * expansion に上乗せすることで、中心部より先に周辺の州から切り崩し、標的を各個撃破・
+ * 孤立させていく優先度を持たせる（仮値）。対象外（annihilateフェイズでない／標的でない）なら0。
+ */
+function campaignIsolationBonus(state: GameState, selfId: FactionId, region: Region): number {
+  const campaign = getCampaigns(state)[selfId];
+  if (!campaign || campaign.phase !== "annihilate" || campaign.targetFactionId !== region.owner) return 0;
+  const ownNeighborCount = region.adjacency.filter((id) => state.regions[id]?.owner === region.owner).length;
+  return 0.15 / (1 + ownNeighborCount);
+}
+
 /**
  * 1軍団分の行動選択肢を組み立てる（設計書 9.4／12章：ArmyPanel.dc.html の
  * 移動/攻撃/退却/略奪コマンドに対応する自動判断版）。
@@ -742,13 +1047,16 @@ function buildActionOptions(
   targetsByLabel.set(holdLabel, { kind: "hold" });
 
   const selfStrength = effectiveStrength(army);
+  const starving = isMercenaryStarving(selfFaction, army);
   let hasAdjacentInvasionTarget = false;
+  const targetedNeighborIds = new Set<RegionId>(); // 略奪ループでの重複選択肢を避けるための記録
 
   for (const neighborId of region.adjacency) {
     const neighbor = state.regions[neighborId];
     if (!neighbor) continue;
     if (selfFaction.diplomacy[neighbor.owner] !== "war") continue;
     hasAdjacentInvasionTarget = true;
+    targetedNeighborIds.add(neighborId);
 
     const defenderArmyStrength = Object.values(state.armies)
       .filter((a) => a.location === neighborId && a.faction === neighbor.owner)
@@ -761,11 +1069,38 @@ function buildActionOptions(
       label,
       description: `${neighbor.name}へ侵攻する`,
       safety: clamp01((ratio >= 1 ? 0.65 : 0.3) - proximity * 0.2),
-      expansion: ratio >= 1 ? 0.95 : 0.45,
+      expansion: clamp01((ratio >= 1 ? 0.95 : 0.45) + campaignIsolationBonus(state, army.faction, neighbor)),
       profit: 0.4,
       legitimacy: 0.2,
     });
     targetsByLabel.set(label, { kind: "move", to: neighborId });
+  }
+
+  // 傭兵団が食い詰めている場合：隣接するどの州も（交戦の有無を問わず）略奪目的の襲撃先になる
+  // （上記 isMercenaryStarving 参照）。侵攻ループで既に選択肢化した隣接州は除外する。
+  if (starving) {
+    for (const neighborId of region.adjacency) {
+      if (targetedNeighborIds.has(neighborId)) continue;
+      const neighbor = state.regions[neighborId];
+      if (!neighbor || neighbor.owner === army.faction) continue;
+
+      const defenderArmyStrength = Object.values(state.armies)
+        .filter((a) => a.location === neighborId && a.faction === neighbor.owner)
+        .reduce((sum, a) => sum + effectiveStrength(a), 0);
+      const defenderStrength = defenderArmyStrength + neighbor.garrison.count * neighbor.garrison.training;
+      const ratio = selfStrength / Math.max(1, defenderStrength);
+
+      const label = nextLabel();
+      options.push({
+        label,
+        description: `${neighbor.name}を略奪目的で襲撃する`,
+        safety: clamp01((ratio >= 1 ? 0.6 : 0.35) - proximity * 0.1),
+        expansion: 0.05,
+        profit: 0.7,
+        legitimacy: 0.05,
+      });
+      targetsByLabel.set(label, { kind: "move", to: neighborId });
+    }
   }
 
   // 隣接州に侵攻対象がない場合のフォールバック（前線への行軍、上記 findMarchStepTowardFront 参照）。
@@ -805,7 +1140,8 @@ function buildActionOptions(
     }
   }
 
-  if (region.owner !== army.faction && selfFaction.diplomacy[region.owner] === "war" && hostileHereStrength === 0) {
+  // 通常の勢力は交戦中の敵地でのみ略奪できるが、食い詰めた傭兵団は交戦の有無を問わず略奪する。
+  if (region.owner !== army.faction && hostileHereStrength === 0 && (selfFaction.diplomacy[region.owner] === "war" || starving)) {
     const label = nextLabel();
     options.push({ label, description: `${region.name}で略奪を行う`, safety: 0.6, expansion: 0.1, profit: 0.8, legitimacy: 0.05 });
     targetsByLabel.set(label, { kind: "pillage" });
@@ -875,6 +1211,9 @@ export function runAction(state: GameState, _options: TurnEngineOptions = {}): G
 /**
  * 行動フェイズ・生成AI丸投げ版（`runDiplomacyAsync` と同じ位置づけ）。
  * 選択肢・状態遷移ロジックは `runAction` と共有し、意思決定方式のみ `decideAction` に差し替える。
+ *
+ * ユーザー要望（ターン進行速度）：`runDiplomacyAsync` と同じく、LLMへの問い合わせは
+ * `GREAT_POWER_FACTION_IDS`（5大勢力）の軍団のみに限定する。
  */
 export async function runActionAsync(state: GameState, aiConfig?: AIProviderConfig): Promise<GameState> {
   const proximity = greatWarProximity(state);
@@ -890,12 +1229,18 @@ export async function runActionAsync(state: GameState, aiConfig?: AIProviderConf
     const { options, targetsByLabel } = buildActionOptions(next, army, proximity);
     if (options.length === 0) continue;
     const region = next.regions[army.location];
-    const context: DecisionContext = {
-      actorRole: army.commander ? "戦闘隊長" : `${faction.name}の君主（現地指揮官不在のため代行）`,
-      summary: `${region?.name ?? "不明な州"}に駐留する軍団の行動を決める。${worldSituationSummary(proximity)}`,
-      greatWarProximity: proximity,
-    };
-    const chosen = await decideAction(context, options, policy, aiConfig);
+    const chosen = GREAT_POWER_FACTION_IDS.includes(army.faction)
+      ? await decideAction(
+          {
+            actorRole: army.commander ? "戦闘隊長" : `${faction.name}の君主（現地指揮官不在のため代行）`,
+            summary: `${region?.name ?? "不明な州"}に駐留する軍団の行動を決める。${worldSituationSummary(proximity)}`,
+            greatWarProximity: proximity,
+          },
+          options,
+          policy,
+          aiConfig,
+        )
+      : decideByScoring(policy, options);
     const target = targetsByLabel.get(chosen.label);
     if (!target || target.kind === "hold") continue;
 

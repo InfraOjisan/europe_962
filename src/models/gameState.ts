@@ -1,4 +1,5 @@
 import type { Army } from "./army.js";
+import type { Campaign } from "./campaign.js";
 import type { Captivity } from "./captivity.js";
 import type { Character } from "./character.js";
 import type { Faction } from "./faction.js";
@@ -54,4 +55,11 @@ export interface GameState {
   readonly playerFactionId: FactionId | null;
   /** 傍観モード中でなければ null。 */
   readonly spectator: SpectatorState | null;
+  /**
+   * 大国キャンペーンAI（設計書 9.4／ユーザー要望）が現在追っている長期の対外方針。
+   * キーはキャンペーンを主導する勢力の FactionId。エントリの無い勢力は現在キャンペーンを
+   * 持たない。既存の GameState リテラル（テスト等）との後方互換のため任意フィールドとし、
+   * 未設定は「キャンペーン無し」として扱う（`turnEngine.ts` の `getCampaigns` 参照）。
+   */
+  readonly campaigns?: Readonly<Record<FactionId, Campaign>>;
 }
