@@ -58,7 +58,10 @@ AI意思決定（`aiPolicy.ts`/`aiProvider.ts`）は `turnEngine.ts` の外交�
 `docs/gamesystem_design.md` 13章）。生成AI丸投げ方式は既定でOpenAI API
 （`OPENAI_API_KEY` 環境変数、モデルは `gpt-4o`）を使い、`AIProviderConfig` で任意の
 OpenAI互換エンドポイント／キー／モデルに差し替えられる。意思決定には常に「大戦への近さ」
-（`warCheck.ts` の `greatWarProximity`）を織り込む。
+（`warCheck.ts` の `greatWarProximity`）を織り込む。ターン進行速度のため、LLMへの問い合わせは
+5大勢力（`GREAT_POWER_FACTION_IDS`）のみに限定しており、それ以外の勢力は常に点数判断で
+処理する。5大勢力には複数年にまたがる長期戦略を持たせる大国キャンペーンAI
+（`docs/gamesystem_design.md` 13.5章）も実装済み。
 
 ### セットアップ・実行
 

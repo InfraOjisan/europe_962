@@ -797,3 +797,239 @@ describe("近攻遠交（設計書 9.4／ユーザー要望）", () => {
     expect(next.factions[factionC]?.diplomacy[factionA]).toBe("alliance");
   });
 });
+
+describe("食い詰めた傭兵団の略奪（ユーザー要望）", () => {
+  const mercFactionId = asFactionId("faction_merc");
+  const neighborFactionId = asFactionId("faction_neighbor");
+  const homeId = asRegionId("region_merc_home");
+  const neighborId = asRegionId("region_neighbor");
+  const mercArmyId = asArmyId("army_merc");
+
+  function army(over: Partial<Army> & Pick<Army, "id" | "faction">): Army {
+    return {
+      commander: null,
+      location: homeId,
+      units: [{ type: "cavalry", count: 900, training: 0.55 }],
+      doctrine: "default",
+      morale: 0.6,
+      supply: 0.8,
+      ...over,
+    };
+  }
+
+  function buildState(treasury: number): GameState {
+    const captain = makeCharacter({
+      id: asCharacterId("captain"),
+      name: "傭兵隊長",
+      faction: mercFactionId,
+      role: "warlord",
+      policy: "self_interest",
+    });
+    // 傭兵団は領地を持たないため、現在地（homeId）は他勢力の領地。ここでは中立との平和状態
+    // （非交戦）のまま隣接州を襲撃できるかを見る。
+    const home = makeRegion({ id: homeId, owner: neighborFactionId, adjacency: [neighborId], garrison: { count: 0, training: 0 } });
+    const neighbor = makeRegion({ id: neighborId, owner: neighborFactionId, adjacency: [homeId], garrison: { count: 50, training: 0.3 } });
+
+    const merc = makeFaction({
+      id: mercFactionId,
+      name: "自由傭兵団",
+      type: "mercenary",
+      ruler: null,
+      warlords: [captain.id],
+      treasury,
+      diplomacy: { [neighborFactionId]: "peace" }, // 交戦状態ではない
+    });
+    const neighborFaction = makeFaction({
+      id: neighborFactionId,
+      name: "隣国",
+      ruler: null,
+      regions: [homeId, neighborId],
+      diplomacy: { [mercFactionId]: "peace" },
+    });
+
+    return {
+      turn: 1,
+      year: 1000,
+      phase: "action",
+      regions: { [homeId]: home, [neighborId]: neighbor },
+      factions: { [mercFactionId]: merc, [neighborFactionId]: neighborFaction },
+      armies: { [mercArmyId]: army({ id: mercArmyId, faction: mercFactionId, commander: captain.id }) },
+      characters: { [captain.id]: captain },
+      captivities: {},
+      greatWarTriggered: false,
+      playerFactionId: null,
+      spectator: null,
+    };
+  }
+
+  it("国庫が十分にあれば、交戦していない隣国を襲わずに現在地へ留まる", () => {
+    const state = buildState(10_000); // 維持費（900*0.08=72/年）の3年分を大きく上回る
+    const next = runAction(state);
+
+    expect(next.armies[mercArmyId]?.location).toBe(homeId);
+  });
+
+  it("国庫が底を突くと、交戦状態でなくても現在地（他勢力の領地）で略奪を行い国庫を潤す", () => {
+    const state = buildState(100); // 維持費の3年分（216）を下回る＝食い詰めている
+    const next = runAction(state);
+
+    // 現在地は既に他勢力の領地であり、まずそこでの略奪が（隣国への移動より）優先される。
+    expect(next.armies[mercArmyId]?.location).toBe(homeId);
+    const loot = Math.round(state.regions[homeId]!.taxBase * 0.5);
+    expect(next.factions[mercFactionId]?.treasury).toBe(100 + loot);
+  });
+
+  it("食い詰めていても、現在地が守備側の大軍に押さえられていれば居座らず手薄な隣国へ向かう", () => {
+    // 現在地での略奪を断念させるため、現在地に自軍より圧倒的に強い交戦中の敵軍を置く
+    // （hostileHereStrength による判定。この場合は隣国への move が「略奪目的の襲撃」
+    // ループ・通常の「侵攻」ループのどちらから提示されても、結果として同じ行動になる）。
+    const state = buildState(100);
+    const guardId = asCharacterId("guard");
+    const guard = makeCharacter({ id: guardId, name: "守備隊長", faction: neighborFactionId, role: "warlord" });
+    const guardArmyId = asArmyId("army_guard");
+    const stateWithGuard: GameState = {
+      ...state,
+      factions: {
+        ...state.factions,
+        [mercFactionId]: { ...state.factions[mercFactionId]!, diplomacy: { [neighborFactionId]: "war" } },
+        [neighborFactionId]: { ...state.factions[neighborFactionId]!, diplomacy: { [mercFactionId]: "war" } },
+      },
+      armies: {
+        ...state.armies,
+        [guardArmyId]: army({
+          id: guardArmyId,
+          faction: neighborFactionId,
+          commander: guardId,
+          location: homeId,
+          units: [{ type: "pike", count: 5000, training: 0.8 }],
+        }),
+      },
+      characters: { ...state.characters, [guardId]: guard },
+    };
+
+    const next = runAction(stateWithGuard);
+
+    expect(next.armies[mercArmyId]?.location).toBe(neighborId);
+  });
+});
+
+describe("大国キャンペーンAI（設計書 9.4／ユーザー要望）", () => {
+  // HRE（5大勢力の1つ）から見て、自領の region_buffer 経由で1ホップ先に弱小な
+  // faction_weak がいる。faction_weak は region_ally 経由で faction_third と隣接している
+  // （isolate フェイズの遠交候補）。faction_third 自体は HRE との優位差が小さく、
+  // 標的としては選ばれない（＝標的選定が本当に「弱い方」を選んでいることの確認を兼ねる）。
+  // 中立勢力2つは、開戦後も大戦（2/3閾値）の誤爆を避けるための頭数合わせ。
+  const hreId = asFactionId("faction_hre"); // GREAT_POWER_FACTION_IDS の一員
+  const weakId = asFactionId("faction_weak");
+  const thirdId = asFactionId("faction_third");
+
+  const regionHre = asRegionId("region_hre");
+  const regionBuffer = asRegionId("region_buffer");
+  const regionTarget = asRegionId("region_target");
+  const regionAlly = asRegionId("region_ally");
+
+  function buildState(year: number): GameState {
+    const hreRuler = makeCharacter({ id: asCharacterId("hre_ruler"), name: "皇帝", faction: hreId, policy: "expansionism" });
+    // expansionism にしておく理由：後段の「劣勢でも和平を結ばない」テストで、標的側が
+    // 独自に和平を持ちかけてしまうと HRE 側の抑制ロジックの検証にならない
+    // （standard の self_preservation だと、標的視点では有利な状況のため和平を選好しやすい）。
+    const weakRuler = makeCharacter({ id: asCharacterId("weak_ruler"), name: "弱小領主", faction: weakId, policy: "expansionism" });
+    const thirdRuler = makeCharacter({ id: asCharacterId("third_ruler"), name: "第三国領主", faction: thirdId });
+
+    const rHre = makeRegion({ id: regionHre, owner: hreId, adjacency: [regionBuffer], garrison: { count: 5000, training: 0.8 } });
+    const rBuffer = makeRegion({ id: regionBuffer, owner: hreId, adjacency: [regionHre, regionTarget] });
+    const rTarget = makeRegion({ id: regionTarget, owner: weakId, adjacency: [regionBuffer, regionAlly], garrison: { count: 50, training: 0.2 } });
+    const rAlly = makeRegion({ id: regionAlly, owner: thirdId, adjacency: [regionTarget], garrison: { count: 4000, training: 1.0 } });
+
+    const fHre = makeFaction({
+      id: hreId,
+      name: "神聖ローマ帝国",
+      ruler: hreRuler.id,
+      regions: [regionHre, regionBuffer],
+      treasury: 10_000,
+      diplomacy: {},
+    });
+    const fWeak = makeFaction({ id: weakId, name: "弱小勢力", ruler: weakRuler.id, regions: [regionTarget], treasury: 100, diplomacy: {} });
+    // faction_third は HRE との優位差が CAMPAIGN_MIN_SUPERIORITY_RATIO を下回るよう、
+    // 経済力・軍事力ともHREに近い水準にしてある（＝標的候補から除外されるはずだが、
+    // isolate フェイズの遠交（同盟）候補としては引き続き有効）。
+    const fThird = makeFaction({ id: thirdId, name: "第三国", ruler: thirdRuler.id, regions: [regionAlly], treasury: 9_000, diplomacy: {} });
+    const neutral1 = makeFaction({ id: asFactionId("neutral1"), name: "中立1", ruler: null });
+    const neutral2 = makeFaction({ id: asFactionId("neutral2"), name: "中立2", ruler: null });
+
+    return {
+      turn: 1,
+      year,
+      phase: "diplomacy",
+      regions: { [regionHre]: rHre, [regionBuffer]: rBuffer, [regionTarget]: rTarget, [regionAlly]: rAlly },
+      factions: { [hreId]: fHre, [weakId]: fWeak, [thirdId]: fThird, [neutral1.id]: neutral1, [neutral2.id]: neutral2 },
+      armies: {},
+      characters: { [hreRuler.id]: hreRuler, [weakRuler.id]: weakRuler, [thirdRuler.id]: thirdRuler },
+      captivities: {},
+      greatWarTriggered: false,
+      playerFactionId: null,
+      spectator: null,
+    };
+  }
+
+  it("再評価年かつ十分な優位があれば、射程内の弱小勢力を標的に選び、その隣国へ同盟を持ちかける（isolate）", () => {
+    const state = buildState(1000); // 1000 % 20 === 0 ＝再評価年
+    const next = runDiplomacy(state);
+
+    expect(next.campaigns?.[hreId]).toMatchObject({ targetFactionId: weakId, phase: "isolate" });
+    // 標的（faction_weak）の隣国である faction_third へ同盟を持ちかける（遠交）。
+    expect(next.factions[thirdId]?.diplomacy[hreId]).toBe("alliance");
+    expect(next.factions[hreId]?.diplomacy[thirdId]).toBe("alliance");
+  });
+
+  it("isolateフェイズが既定年数を超えると annihilate へ移行し、即座に標的へ宣戦布告する", () => {
+    const state = buildState(1015);
+    const withCampaign: GameState = {
+      ...state,
+      campaigns: { [hreId]: { targetFactionId: weakId, phase: "isolate", startedYear: 1000 } }, // 経過15年
+    };
+    const next = runDiplomacy(withCampaign);
+
+    expect(next.campaigns?.[hreId]?.phase).toBe("annihilate");
+    expect(next.factions[hreId]?.diplomacy[weakId]).toBe("war");
+    expect(next.factions[weakId]?.diplomacy[hreId]).toBe("war");
+  });
+
+  it("annihilateフェイズで交戦中は、たとえ劣勢でも標的とは和平を結ばない（妥協しない）", () => {
+    const state = buildState(1020);
+    // HRE を意図的に軍事的劣勢にする（駐留兵を無力化）。素の点数判断であれば「和平を
+    // 申し入れる」が最高スコアになりうる状況で、それでもキャンペーンの意志を優先するかを見る。
+    const weakened: GameState = {
+      ...state,
+      regions: { ...state.regions, [regionHre]: { ...state.regions[regionHre]!, garrison: { count: 0, training: 0 } } },
+      factions: {
+        ...state.factions,
+        [hreId]: { ...state.factions[hreId]!, diplomacy: { [weakId]: "war" } },
+        [weakId]: { ...state.factions[weakId]!, diplomacy: { [hreId]: "war" }, regions: [regionTarget], treasury: 50_000 },
+      },
+      campaigns: { [hreId]: { targetFactionId: weakId, phase: "annihilate", startedYear: 990 } },
+    };
+    // faction_weak 側の軍事力も底上げし、HRE が明確な劣勢になるようにする。
+    const stronglyDefended: GameState = {
+      ...weakened,
+      regions: { ...weakened.regions, [regionTarget]: { ...weakened.regions[regionTarget]!, garrison: { count: 50_000, training: 0.9 } } },
+    };
+
+    const next = runDiplomacy(stronglyDefended);
+
+    expect(next.factions[hreId]?.diplomacy[weakId]).toBe("war"); // 和平に転じていない
+    expect(next.campaigns?.[hreId]?.phase).toBe("annihilate"); // キャンペーンも継続中
+  });
+
+  it("標的が滅亡すると、そのキャンペーンは終了する", () => {
+    const state = buildState(1000);
+    const withDeadTarget: GameState = {
+      ...state,
+      factions: { ...state.factions, [weakId]: { ...state.factions[weakId]!, alive: false, regions: [] } },
+      campaigns: { [hreId]: { targetFactionId: weakId, phase: "annihilate", startedYear: 980 } },
+    };
+    const next = runDiplomacy(withDeadTarget);
+
+    expect(next.campaigns?.[hreId]).toBeUndefined();
+  });
+});

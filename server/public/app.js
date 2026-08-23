@@ -1,5 +1,13 @@
 import { MAP_LAYOUT, MAP_VIEWBOX, SEA_PATCHES, SPANISH_ROAD } from "./mapLayout.js";
 
+/**
+ * 勢力一覧パネル（ユーザー要望）：27勢力すべてを常時表示すると情報過多で見たい情報が
+ * 埋もれるため、既定では大陸の主要勢力＋プレイヤーの操作勢力のみを表示する。
+ * それ以外は「すべて表示」トグルで一覧を開けるほか、地図上の州クリックでも
+ * 領有勢力の概要を確認できる（`renderRegionDetail` 参照）。
+ */
+const MAJOR_FACTION_IDS = new Set(["faction_hre", "faction_papal", "faction_england", "faction_west_francia", "faction_castile"]);
+
 const FACTION_COLORS = ["#a97729", "#5b7ea3", "#8a3b3b", "#6d5590", "#4d7c3f", "#b7862f", "#3f6b7c", "#7c3f6b"];
 const factionColor = new Map();
 function colorFor(factionId) {
@@ -30,12 +38,14 @@ const els = {
   pickerOverlay: document.getElementById("faction-picker-overlay"),
   pickerList: document.getElementById("faction-picker-list"),
   pickerObserveBtn: document.getElementById("picker-observe-btn"),
+  factionsToggleBtn: document.getElementById("factions-toggle-btn"),
 };
 
 let factionNameOf = new Map();
 let hasShownInitialPicker = false;
 let currentState = null;
 let selectedRegionId = null;
+let showAllFactions = false;
 const logHistory = []; // { year, lines: string[] }
 
 function render(state) {
@@ -206,6 +216,10 @@ function shortLabel(name) {
   return name.replace(/[（(].*?[）)]/g, "").trim();
 }
 
+/**
+ * 州の詳細に加え、その領有勢力の概要（国庫・州数・戦争状態）も表示する
+ * （ユーザー要望：勢力一覧に出ない勢力も、地図の州クリックで様子を確認できるように）。
+ */
 function renderRegionDetail(region) {
   if (!region) {
     els.regionDetail.textContent = "州（ノード）をクリックすると詳細を表示します。";
@@ -215,9 +229,16 @@ function renderRegionDetail(region) {
   if (region.frontier) flags.push('<span class="flag frontier">辺境（版図外勢力の侵寇対象）</span>');
   if (region.fortified) flags.push('<span class="flag fortified">城塞</span>');
   if (region.siege) flags.push('<span class="flag siege">包囲中</span>');
+
+  const owner = currentState?.factions.find((f) => f.id === region.owner);
+  const ownerMeta = owner
+    ? `${owner.type === "lord" ? "領主" : "傭兵団"} ／ 州 ${owner.regions.length} ／ 国庫 ${owner.treasury.toLocaleString()}${owner.atWar ? " ／ 戦争中" : ""}`
+    : "";
+
   els.regionDetail.innerHTML = `
     <div class="rd-name">${escapeHtml(region.name)}</div>
     <div class="rd-owner" style="background:${colorFor(region.owner)}">${escapeHtml(factionNameOf.get(region.owner) ?? region.owner)}</div>
+    ${ownerMeta ? `<div class="rd-meta">${ownerMeta}</div>` : ""}
     <div class="rd-meta">
       人口 ${region.population.toLocaleString()} ／ 税基盤 ${region.taxBase.toLocaleString()} ／ 地勢: ${region.archetype}
     </div>
@@ -226,8 +247,20 @@ function renderRegionDetail(region) {
 }
 
 function renderFactions(state) {
+  const visibleFactions = showAllFactions
+    ? state.factions
+    : state.factions.filter((f) => MAJOR_FACTION_IDS.has(f.id) || f.id === state.playerFactionId);
+
+  els.factionsToggleBtn.textContent = showAllFactions ? "主要勢力のみ表示" : `すべて表示（全${state.factions.length}勢力）`;
+
   els.factions.innerHTML = "";
-  for (const f of state.factions) {
+  if (!showAllFactions && visibleFactions.length < state.factions.length) {
+    const note = document.createElement("div");
+    note.className = "log-empty";
+    note.textContent = "大陸の主要勢力とプレイヤー勢力のみ表示中。他は地図の州クリックか「すべて表示」で確認できます。";
+    els.factions.appendChild(note);
+  }
+  for (const f of visibleFactions) {
     const isPlayer = f.id === state.playerFactionId;
     const card = document.createElement("div");
     card.className = "faction-card" + (f.alive ? "" : " dead") + (isPlayer ? " is-player" : "");
@@ -348,6 +381,10 @@ async function resetGame() {
 
 els.advanceBtn.addEventListener("click", advanceYear);
 els.resetBtn.addEventListener("click", resetGame);
+els.factionsToggleBtn.addEventListener("click", () => {
+  showAllFactions = !showAllFactions;
+  if (currentState) renderFactions(currentState);
+});
 els.changeFactionBtn.addEventListener("click", () => currentState && openFactionPicker(currentState));
 els.pickerObserveBtn.addEventListener("click", () => selectFaction(null));
 els.pickerOverlay.addEventListener("click", (e) => {
