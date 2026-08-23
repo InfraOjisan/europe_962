@@ -1,6 +1,6 @@
 import { effectiveStrength, totalTroops, type Army } from "../models/army.js";
 import type { CasualtyReport } from "../models/battle.js";
-import { isAtWar, type DiplomaticStance } from "../models/faction.js";
+import { isAtWar, type DiplomaticStance, type Faction } from "../models/faction.js";
 import { asArmyId } from "../models/ids.js";
 import type { FactionId, GameState, Policy, Region, RegionId, TurnPhase } from "../models/index.js";
 import type { DecisionContext, DecisionOption, RandomSource } from "./aiPolicy.js";
@@ -37,6 +37,12 @@ import { checkGreatWar, greatWarProximity } from "./warCheck.js";
 const SURPRISE_COMMAND_THRESHOLD = 0.7;
 /** 同一州・同一ターン内で連続解決する遭遇戦の上限（無限ループ防止の安全弁）。 */
 const MAX_ENCOUNTERS_PER_REGION = 20;
+/**
+ * 「近攻遠交」（設計書 9.4）：隣接する相手との軍事力比がこの値を下回ると
+ * 「明確に劣勢＝脅威」とみなし、その脅威を挟んで反対側にいる勢力へ同盟を
+ * 持ちかける動機になる（`findThreatNeighbor`）。仮値・要継続バランス調整。
+ */
+const THREAT_RATIO_THRESHOLD = 0.75;
 
 /**
  * ターン進行の各フェイズに渡す実行時オプション。
@@ -63,6 +69,23 @@ function applyArmyCasualties(army: Army, casualties: CasualtyReport): Army {
   const survivingFraction = Math.max(0, Math.min(1, (startTotal - totalLost) / startTotal));
   const units = army.units.map((u) => ({ ...u, count: Math.max(0, Math.round(u.count * survivingFraction)) }));
   return { ...army, units, morale: casualties.moraleAfter };
+}
+
+/**
+ * 州の占領によって最後の領土を失った勢力を滅亡（`alive: false`）として扱う
+ * （`succession.ts` の家系断絶・拘束による解体と同じ表現規約：勢力そのものは
+ * 残すが、州は接収可能な係争地として扱う）。
+ *
+ * これが無いと、征服し尽くした後も敗者が「生存」扱いのまま外交関係だけが
+ * 残り続け、`pickBestDiplomaticMove` が実体のない相手との関係（もはや動かしようが
+ * ない継続中の「戦争」など）を毎ターン最善手として選び続けてしまい、他の生きた
+ * 勢力との新たな外交・軍事上の変化が起きにくくなる（「変化が少ない」という
+ * フィードバックの一因）。
+ */
+function eliminateFactionIfLandless(factions: GameState["factions"], factionId: FactionId): GameState["factions"] {
+  const faction = factions[factionId];
+  if (!faction || !faction.alive || faction.regions.length > 0) return factions;
+  return { ...factions, [factionId]: { ...faction, alive: false, ruler: null, heir: null } };
 }
 
 /** 1件の戦闘結果（因果律の保護を通した後）を GameState に反映する。 */
@@ -100,6 +123,7 @@ function applyBattleOutcome(
           ? { [newOwner]: { ...winnerFaction, regions: [...winnerFaction.regions, outcome.region] } }
           : {}),
       };
+      if (previousOwner) factions = eliminateFactionIfLandless(factions, previousOwner);
     }
   }
 
@@ -189,6 +213,7 @@ function resolveGarrisonDefense(
         : {}),
       ...(winnerFaction ? { [newOwner]: { ...winnerFaction, regions: [...winnerFaction.regions, region.id] } } : {}),
     };
+    factions = eliminateFactionIfLandless(factions, previousOwner);
   } else {
     regions = { ...regions, [region.id]: { ...region, garrison: { ...region.garrison, count: survivingGarrison } } };
   }
@@ -254,19 +279,61 @@ function worldSituationSummary(proximity: number): string {
   return `大戦（世界同時多発戦争によるゲームオーバー）への近さ: ${Math.round(proximity * 100)}%`;
 }
 
+/** 勢力の総合軍事力（保有する全野戦軍の実効兵力＋全州の駐留兵）。 */
+function factionMilitaryStrength(state: GameState, factionId: FactionId): number {
+  let total = 0;
+  for (const army of Object.values(state.armies)) {
+    if (army.faction === factionId) total += effectiveStrength(army);
+  }
+  for (const region of Object.values(state.regions)) {
+    if (region.owner === factionId) total += region.garrison.count * region.garrison.training;
+  }
+  return total;
+}
+
 /** 2勢力間の軍事力比（自軍 / 相手軍、駐留兵含む）。1を超えるほど自軍優勢。 */
 function militaryStrengthRatio(state: GameState, selfId: FactionId, counterpartId: FactionId): number {
-  const strengthOf = (factionId: FactionId): number => {
-    let total = 0;
-    for (const army of Object.values(state.armies)) {
-      if (army.faction === factionId) total += effectiveStrength(army);
+  return factionMilitaryStrength(state, selfId) / Math.max(1, factionMilitaryStrength(state, counterpartId));
+}
+
+/**
+ * 自勢力に隣接（＝ `Faction.diplomacy` にエントリがある）する勢力の中で、自分が
+ * 明確に劣勢な相手（＝軍事的な脅威）を1つ返す。複数いる場合は最も強い（比率が最小の）
+ * ものを選ぶ。存在しなければ null。
+ */
+function findThreatNeighbor(state: GameState, selfId: FactionId): { readonly threatId: FactionId; readonly ratio: number } | null {
+  const self = state.factions[selfId];
+  if (!self) return null;
+
+  let worst: { threatId: FactionId; ratio: number } | null = null;
+  for (const counterpartId of Object.keys(self.diplomacy) as FactionId[]) {
+    const counterpart = state.factions[counterpartId];
+    if (!counterpart || !counterpart.alive) continue;
+    const ratio = militaryStrengthRatio(state, selfId, counterpartId);
+    if (ratio < THREAT_RATIO_THRESHOLD && (!worst || ratio < worst.ratio)) {
+      worst = { threatId: counterpartId, ratio };
     }
-    for (const region of Object.values(state.regions)) {
-      if (region.owner === factionId) total += region.garrison.count * region.garrison.training;
+  }
+  return worst;
+}
+
+/**
+ * `threatId` の勢力が領有する州に隣接する州を持つ、`selfId`・`threatId` 以外の勢力一覧
+ * （＝threatを挟んで自分の反対側にいる、"遠交" の候補）。
+ */
+function findSharedBorderFactions(state: GameState, selfId: FactionId, threatId: FactionId): readonly FactionId[] {
+  const threat = state.factions[threatId];
+  if (!threat) return [];
+  const candidates = new Set<FactionId>();
+  for (const regionId of threat.regions) {
+    const region = state.regions[regionId];
+    if (!region) continue;
+    for (const neighborId of region.adjacency) {
+      const ownerId = state.regions[neighborId]?.owner;
+      if (ownerId && ownerId !== selfId && ownerId !== threatId) candidates.add(ownerId);
     }
-    return total;
-  };
-  return strengthOf(selfId) / Math.max(1, strengthOf(counterpartId));
+  }
+  return [...candidates];
 }
 
 const clamp01 = (n: number): number => Math.max(0, Math.min(1, n));
@@ -340,8 +407,8 @@ function buildDiplomaticOptions(
         {
           label: "A",
           description: `${counterpart.name}に宣戦布告する`,
-          safety: clamp01((ratio >= 2.0 ? 0.5 : 0.15) - proximity * 0.4),
-          expansion: ratio >= 2.0 ? 0.85 : 0.3,
+          safety: clamp01((ratio >= 1.3 ? 0.6 : 0.25) - proximity * 0.4),
+          expansion: ratio >= 1.3 ? 0.9 : 0.4,
           profit: 0.3,
           legitimacy: 0.1,
         },
@@ -380,8 +447,8 @@ function buildDiplomaticOptions(
       {
         label: "B",
         description: `${counterpart.name}との同盟を破棄して開戦する`,
-        safety: clamp01((ratio >= 2.2 ? 0.35 : 0.05) - proximity * 0.4),
-        expansion: ratio >= 2.2 ? 0.8 : 0.15,
+        safety: clamp01((ratio >= 1.6 ? 0.45 : 0.1) - proximity * 0.4),
+        expansion: ratio >= 1.6 ? 0.85 : 0.2,
         profit: 0.3,
         legitimacy: 0.03,
       },
@@ -416,11 +483,37 @@ function applyDiplomaticChoice(
 }
 
 /**
+ * 外交上の一手。既存の関係（war/peace/alliance）を遷移させる "adjust" と、
+ * まだ関係を持たない遠方の勢力へ新たに同盟を持ちかける "new_alliance"（近攻遠交、下記）
+ * の2種類がある。
+ */
+type DiplomaticMove =
+  | { readonly kind: "adjust"; readonly counterpartId: FactionId; readonly stance: DiplomaticStance; readonly option: DecisionOption; readonly score: number }
+  | { readonly kind: "new_alliance"; readonly counterpartId: FactionId; readonly option: DecisionOption; readonly score: number };
+
+/** 「脅威を挟んで反対側の勢力に同盟を持ちかける（遠交）」選択肢のスコア（設計書 9.4、仮値）。 */
+function distantAllianceOption(threatName: string, candidateName: string): DecisionOption {
+  return {
+    label: "E",
+    description: `${threatName}への牽制を念頭に、${candidateName}に同盟を持ちかける（遠交）`,
+    safety: 0.8,
+    expansion: 0.2,
+    profit: 0.1,
+    legitimacy: 0.7,
+  };
+}
+
+/**
  * ある勢力について、まだこのターン処理されていない相手ごとに最善手を評価し、
  * 勢力全体としては最もスコアの高い1件だけを実行対象として選ぶ。
  * 「1年（1ターン）につき、外交上の大きな方針転換は1つまで」という抽象化により、
  * 同時多方面への宣戦布告のような不自然な暴走（史実にそぐわず、大戦条件も
  * 不用意に満たしてしまう）を避ける（設計書 9.4、要継続バランス調整）。
+ *
+ * 「近攻遠交」（ユーザー要望）：隣接する既存の関係の見直しに加えて、自分にとって
+ * 明確な脅威となっている隣国（`findThreatNeighbor`）がいる場合、その脅威を挟んで
+ * 反対側にいる勢力（`findSharedBorderFactions`）へ新たに同盟を持ちかける選択肢も
+ * 候補に加える——遠くの勢力と結び、近くの脅威を包囲する動機を持たせる。
  */
 function pickBestDiplomaticMove(
   state: GameState,
@@ -428,11 +521,11 @@ function pickBestDiplomaticMove(
   policy: Policy,
   proximity: number,
   processedPairs: Set<string>,
-): { readonly counterpartId: FactionId; readonly stance: DiplomaticStance; readonly option: DecisionOption } | null {
+): DiplomaticMove | null {
   const self = state.factions[selfId];
   if (!self) return null;
 
-  let best: { counterpartId: FactionId; stance: DiplomaticStance; option: DecisionOption; score: number } | null = null;
+  let best: DiplomaticMove | null = null;
   for (const counterpartId of Object.keys(self.diplomacy) as FactionId[]) {
     const pairKey = [selfId, counterpartId].sort().join("|");
     if (processedPairs.has(pairKey)) continue;
@@ -441,9 +534,42 @@ function pickBestDiplomaticMove(
     if (!built) continue;
     const chosen = decideByScoring(policy, built.options);
     const score = scoreOption(chosen, policy);
-    if (!best || score > best.score) best = { counterpartId, stance: built.stance, option: chosen, score };
+    if (!best || score > best.score) best = { kind: "adjust", counterpartId, stance: built.stance, option: chosen, score };
   }
+
+  const threat = findThreatNeighbor(state, selfId);
+  if (threat) {
+    const threatFaction = state.factions[threat.threatId];
+    for (const candidateId of findSharedBorderFactions(state, selfId, threat.threatId)) {
+      const pairKey = [selfId, candidateId].sort().join("|");
+      if (processedPairs.has(pairKey)) continue;
+      const candidateFaction = state.factions[candidateId];
+      if (!candidateFaction || !candidateFaction.alive || candidateFaction.type !== "lord") continue;
+      const existingStance = self.diplomacy[candidateId];
+      if (existingStance === "alliance" || existingStance === "vassal") continue; // 既に友好的なら不要
+
+      const option = distantAllianceOption(threatFaction?.name ?? threat.threatId, candidateFaction.name);
+      const score = scoreOption(option, policy);
+      if (!best || score > best.score) best = { kind: "new_alliance", counterpartId: candidateId, option, score };
+    }
+  }
+
   return best;
+}
+
+/** `pickBestDiplomaticMove` の結果を実際の外交状態遷移に変換する。 */
+function applyDiplomaticMove(factions: GameState["factions"], selfId: FactionId, move: DiplomaticMove): GameState["factions"] {
+  if (move.kind === "new_alliance") {
+    const self = factions[selfId];
+    const other = factions[move.counterpartId];
+    if (!self || !other) return factions;
+    return {
+      ...factions,
+      [selfId]: { ...self, diplomacy: { ...self.diplomacy, [move.counterpartId]: "alliance" } },
+      [move.counterpartId]: { ...other, diplomacy: { ...other.diplomacy, [selfId]: "alliance" } },
+    };
+  }
+  return applyDiplomaticChoice(factions, selfId, move.counterpartId, move.stance, move.option.label);
 }
 
 /**
@@ -464,7 +590,7 @@ export function runDiplomacy(state: GameState, _options: TurnEngineOptions = {})
     if (!best) continue;
     processedPairs.add([self.id, best.counterpartId].sort().join("|"));
 
-    const candidateFactions = applyDiplomaticChoice(factions, self.id, best.counterpartId, best.stance, best.option.label);
+    const candidateFactions = applyDiplomaticMove(factions, self.id, best);
     if (candidateFactions !== factions && wouldSingleHandedlyTriggerGreatWar(state, candidateFactions)) continue;
     factions = candidateFactions;
   }
@@ -494,7 +620,7 @@ export async function runDiplomacyAsync(
 
     // runDiplomacy と同じく「1ターンにつき1手」に絞る。相手ごとに生成AIへ問い合わせ、
     // 返ってきた選択肢群の中で最もスコアの高い1件だけを実行する。
-    let best: { counterpartId: FactionId; stance: DiplomaticStance; option: DecisionOption; score: number } | null = null;
+    let best: DiplomaticMove | null = null;
     for (const counterpartId of Object.keys(self.diplomacy) as FactionId[]) {
       const pairKey = [self.id, counterpartId].sort().join("|");
       if (processedPairs.has(pairKey)) continue;
@@ -509,12 +635,31 @@ export async function runDiplomacyAsync(
       };
       const chosen = await decideAction(context, built.options, ruler.policy, aiConfig);
       const score = scoreOption(chosen, ruler.policy);
-      if (!best || score > best.score) best = { counterpartId, stance: built.stance, option: chosen, score };
+      if (!best || score > best.score) best = { kind: "adjust", counterpartId, stance: built.stance, option: chosen, score };
+    }
+
+    // 近攻遠交（runDiplomacy と同じロジックを共有）：LLMへの追加問い合わせはせず、
+    // 点数判断でこの副次的な判断を行う（LLM呼び出し回数を抑えるため）。
+    const threat = findThreatNeighbor(state, self.id);
+    if (threat) {
+      const threatFaction = state.factions[threat.threatId];
+      for (const candidateId of findSharedBorderFactions(state, self.id, threat.threatId)) {
+        const pairKey = [self.id, candidateId].sort().join("|");
+        if (processedPairs.has(pairKey)) continue;
+        const candidateFaction = state.factions[candidateId];
+        if (!candidateFaction || !candidateFaction.alive || candidateFaction.type !== "lord") continue;
+        const existingStance = self.diplomacy[candidateId];
+        if (existingStance === "alliance" || existingStance === "vassal") continue;
+
+        const option = distantAllianceOption(threatFaction?.name ?? threat.threatId, candidateFaction.name);
+        const score = scoreOption(option, ruler.policy);
+        if (!best || score > best.score) best = { kind: "new_alliance", counterpartId: candidateId, option, score };
+      }
     }
 
     if (best) {
       processedPairs.add([self.id, best.counterpartId].sort().join("|"));
-      const candidateFactions = applyDiplomaticChoice(factions, self.id, best.counterpartId, best.stance, best.option.label);
+      const candidateFactions = applyDiplomaticMove(factions, self.id, best);
       if (!(candidateFactions !== factions && wouldSingleHandedlyTriggerGreatWar(state, candidateFactions))) {
         factions = candidateFactions;
       }
@@ -530,6 +675,49 @@ type ArmyActionTarget =
   | { readonly kind: "hold" }
   | { readonly kind: "move"; readonly to: RegionId }
   | { readonly kind: "pillage" };
+
+/**
+ * 隣接州に侵攻対象がない場合のフォールバック：交戦中の勢力が領有する最寄りの州へ向けて、
+ * 州の隣接グラフ上を幅優先探索し、最初の1歩だけを返す（設計書 9.4／ユーザー要望対応）。
+ *
+ * 各勢力の野戦軍は基本的に1個のみで、`buildActionOptions` は自軍がいる州に
+ * 直接隣接する敵州にしか侵攻できなかった。そのため、隣接していない相手と開戦しても
+ * 軍団が前線へ到達する手段が無く、宣戦布告そのものが領土の変化に繋がらないケースが
+ * 大半だった（1000年シミュレーションで領有変更が数件しか発生しない主因）。
+ * 本関数は簡易的な経路探索で「前線へ向けて行軍する」選択肢を用意し、複数ターンかけて
+ * 実際に交戦・占領へ到達できるようにする。
+ */
+function findMarchStepTowardFront(state: GameState, army: Army, selfFaction: Faction): RegionId | null {
+  const start = army.location;
+  const visited = new Set<RegionId>([start]);
+  const cameFrom = new Map<RegionId, RegionId>();
+  const queue: RegionId[] = [start];
+  let head = 0;
+
+  while (head < queue.length) {
+    const current = queue[head++]!;
+    const currentRegion = state.regions[current];
+    if (!currentRegion) continue;
+
+    for (const neighborId of currentRegion.adjacency) {
+      if (visited.has(neighborId)) continue;
+      visited.add(neighborId);
+      cameFrom.set(neighborId, current);
+
+      const neighborRegion = state.regions[neighborId];
+      if (neighborRegion && selfFaction.diplomacy[neighborRegion.owner] === "war") {
+        // start からこの州までの経路を遡り、start の直後の1歩を割り出す。
+        let step = neighborId;
+        while (cameFrom.get(step) !== start && cameFrom.has(step)) {
+          step = cameFrom.get(step)!;
+        }
+        return step;
+      }
+      queue.push(neighborId);
+    }
+  }
+  return null;
+}
 
 /**
  * 1軍団分の行動選択肢を組み立てる（設計書 9.4／12章：ArmyPanel.dc.html の
@@ -554,11 +742,13 @@ function buildActionOptions(
   targetsByLabel.set(holdLabel, { kind: "hold" });
 
   const selfStrength = effectiveStrength(army);
+  let hasAdjacentInvasionTarget = false;
 
   for (const neighborId of region.adjacency) {
     const neighbor = state.regions[neighborId];
     if (!neighbor) continue;
     if (selfFaction.diplomacy[neighbor.owner] !== "war") continue;
+    hasAdjacentInvasionTarget = true;
 
     const defenderArmyStrength = Object.values(state.armies)
       .filter((a) => a.location === neighborId && a.faction === neighbor.owner)
@@ -570,12 +760,29 @@ function buildActionOptions(
     options.push({
       label,
       description: `${neighbor.name}へ侵攻する`,
-      safety: clamp01((ratio >= 1 ? 0.5 : 0.2) - proximity * 0.2),
-      expansion: ratio >= 1 ? 0.9 : 0.4,
+      safety: clamp01((ratio >= 1 ? 0.65 : 0.3) - proximity * 0.2),
+      expansion: ratio >= 1 ? 0.95 : 0.45,
       profit: 0.4,
       legitimacy: 0.2,
     });
     targetsByLabel.set(label, { kind: "move", to: neighborId });
+  }
+
+  // 隣接州に侵攻対象がない場合のフォールバック（前線への行軍、上記 findMarchStepTowardFront 参照）。
+  if (!hasAdjacentInvasionTarget && isAtWar(selfFaction)) {
+    const step = findMarchStepTowardFront(state, army, selfFaction);
+    if (step) {
+      const label = nextLabel();
+      options.push({
+        label,
+        description: `前線へ向けて行軍する`,
+        safety: clamp01(0.5 - proximity * 0.2),
+        expansion: 0.5,
+        profit: 0.2,
+        legitimacy: 0.3,
+      });
+      targetsByLabel.set(label, { kind: "move", to: step });
+    }
   }
 
   const hostileHereStrength = Object.values(state.armies)

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createInitialGameState } from "../data/initialState.js";
 import { asFactionId } from "../models/ids.js";
+import type { GameState } from "../models/gameState.js";
 import { applyYearStartEvents } from "./eventEngine.js";
 import { HISTORICAL_EVENTS } from "../data/historicalEvents.js";
 import { validateGameState } from "../utils/validation.js";
@@ -51,14 +52,48 @@ describe("applyYearStartEvents", () => {
     expect(result.state.factions[BYZANTIUM]?.diplomacy[PAPAL]).toBe("peace");
   });
 
-  it("ナポレオン戦争（1799年）は生存する全ての領主家を相互に戦争状態にする", () => {
+  it("ナポレオン戦争（1799年）は西フランク（フランス）を起点に、同盟国以外の全関係を戦争状態にする", () => {
     const state = atYear(1799);
+    const westFrancia = asFactionId("faction_west_francia");
+    const westFranciaFaction = state.factions[westFrancia]!;
+    // 初期データ上の西フランクの関係（同盟国が無い）を確認しておく。
+    expect(Object.values(westFranciaFaction.diplomacy)).not.toContain("alliance");
+    const relationCount = Object.keys(westFranciaFaction.diplomacy).length;
+    expect(relationCount).toBeGreaterThan(0);
+
     const result = applyYearStartEvents(state);
-    const hre = result.state.factions[HRE]!;
-    expect(hre.diplomacy[asFactionId("faction_west_francia")]).toBe("war");
-    expect(hre.diplomacy[PAPAL]).toBe("war");
-    expect(hre.diplomacy[BYZANTIUM]).toBe("war");
+    const france = result.state.factions[westFrancia]!;
+    // 同盟国以外の全関係が戦争状態になる。
+    for (const stance of Object.values(france.diplomacy)) {
+      expect(stance).toBe("war");
+    }
+    // 相手側からも対称に war になっている。
+    for (const counterpartId of Object.keys(france.diplomacy)) {
+      expect(result.state.factions[asFactionId(counterpartId)]?.diplomacy[westFrancia]).toBe("war");
+    }
     expect(validateGameState(result.state).issues).toEqual([]);
+  });
+
+  it("ナポレオン戦争（1799年）は、同盟国とは開戦せず、西フランクが滅亡していれば何も起こさない", () => {
+    const state = atYear(1799);
+    const westFrancia = asFactionId("faction_west_francia");
+    const withAlliance = {
+      ...state,
+      factions: {
+        ...state.factions,
+        [westFrancia]: { ...state.factions[westFrancia]!, diplomacy: { ...state.factions[westFrancia]!.diplomacy, [HRE]: "alliance" as const } },
+        [HRE]: { ...state.factions[HRE]!, diplomacy: { ...state.factions[HRE]!.diplomacy, [westFrancia]: "alliance" as const } },
+      },
+    };
+    const result = applyYearStartEvents(withAlliance);
+    expect(result.state.factions[westFrancia]?.diplomacy[HRE]).toBe("alliance"); // 同盟国とは開戦しない
+
+    const francePerished: GameState = {
+      ...state,
+      factions: { ...state.factions, [westFrancia]: { ...state.factions[westFrancia]!, alive: false } },
+    };
+    const noOpResult = applyYearStartEvents(francePerished);
+    expect(noOpResult.state.factions[westFrancia]).toEqual(francePerished.factions[westFrancia]); // no-op
   });
 
   it("マグナ・カルタ（1215年）はイングランドの国庫を減らす（27勢力シナリオでは実効果を持つ）", () => {
