@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { asArmyId, asCharacterId, asFactionId, asRegionId } from "../models/ids.js";
+import type { FactionId } from "../models/ids.js";
 import type { Army } from "../models/army.js";
 import type { Character } from "../models/character.js";
 import type { Faction } from "../models/faction.js";
@@ -234,9 +235,14 @@ describe("後継者危機の統合", () => {
 
 describe("大戦発生時の停止", () => {
   it("年末集計で大戦条件を満たすと greatWarTriggered が立ち、以降 advanceYear は何もしない", () => {
+    // 大戦は多極的な世界を前提とする（`GREAT_WAR_MIN_ALIVE_FACTIONS`、warCheck.ts）ため、
+    // 最低ラインを満たすよう6勢力・4勢力交戦の構成にする。
     const f1 = asFactionId("f1");
     const f2 = asFactionId("f2");
     const f3 = asFactionId("f3");
+    const f4 = asFactionId("f4");
+    const f5 = asFactionId("f5");
+    const f6 = asFactionId("f6");
     const state: GameState = {
       turn: 10,
       year: 972,
@@ -246,6 +252,9 @@ describe("大戦発生時の停止", () => {
         [f1]: makeFaction({ id: f1, name: "F1", ruler: null, diplomacy: { [f2]: "war" } }),
         [f2]: makeFaction({ id: f2, name: "F2", ruler: null, diplomacy: { [f1]: "war" } }),
         [f3]: makeFaction({ id: f3, name: "F3", ruler: null, diplomacy: { [f1]: "war" } }),
+        [f4]: makeFaction({ id: f4, name: "F4", ruler: null, diplomacy: { [f3]: "war" } }),
+        [f5]: makeFaction({ id: f5, name: "F5", ruler: null, diplomacy: {} }),
+        [f6]: makeFaction({ id: f6, name: "F6", ruler: null, diplomacy: {} }),
       },
       armies: {},
       characters: {},
@@ -566,26 +575,32 @@ describe("外交フェイズへのAI接続（設計書 9.4）", () => {
   });
 
   it("その一手が単独で大戦（世界のゲームオーバー）を引き起こす場合は見送る", () => {
-    // 生存4勢力中、既に2勢力（弱国・第三国）が戦争状態（war_ratio 50%）。
-    // ここで強国が弱国にも宣戦すると、戦争状態の勢力が3/4＝75%となり、
+    // 生存6勢力（大戦の最低勢力数 `GREAT_WAR_MIN_ALIVE_FACTIONS` を満たす）中、
+    // 既に3勢力（弱国・第三国・第四国）が戦争状態（war_ratio 50%）。
+    // ここで強国が弱国にも宣戦すると、戦争状態の勢力が4/6＝約67%となり、
     // 大戦の閾値（2/3）を単独で超えてしまう。
     const thirdId = asFactionId("faction_third");
+    const fourthId = asFactionId("faction_fourth");
     const thirdRuler = makeCharacter({ id: asCharacterId("third_ruler"), name: "第三国の君主", faction: thirdId });
-    const thirdFaction = makeFaction({ id: thirdId, name: "第三国", ruler: thirdRuler.id, diplomacy: { [weakId]: "war" } });
+    const fourthRuler = makeCharacter({ id: asCharacterId("fourth_ruler"), name: "第四国の君主", faction: fourthId });
+    const thirdFaction = makeFaction({
+      id: thirdId,
+      name: "第三国",
+      ruler: thirdRuler.id,
+      diplomacy: { [weakId]: "war", [fourthId]: "war" },
+    });
+    const fourthFaction = makeFaction({ id: fourthId, name: "第四国", ruler: fourthRuler.id, diplomacy: { [thirdId]: "war" } });
 
     const base = twoFactionPeaceState();
     const weakWithThirdWar = {
       ...base.factions[weakId]!,
       diplomacy: { ...base.factions[weakId]!.diplomacy, [thirdId]: "war" as const },
     };
-    // twoFactionPeaceState の中立勢力を1つに絞り、生存勢力数を4に固定する
-    // （war_ratio の分母をこのテストの意図どおりに保つため）。
-    const { [asFactionId("faction_neutral2")]: _removedNeutral2, ...factionsWithoutNeutral2 } = base.factions;
 
     const state: GameState = {
       ...base,
-      factions: { ...factionsWithoutNeutral2, [weakId]: weakWithThirdWar, [thirdId]: thirdFaction },
-      characters: { ...base.characters, [thirdRuler.id]: thirdRuler },
+      factions: { ...base.factions, [weakId]: weakWithThirdWar, [thirdId]: thirdFaction, [fourthId]: fourthFaction },
+      characters: { ...base.characters, [thirdRuler.id]: thirdRuler, [fourthRuler.id]: fourthRuler },
     };
 
     const next = runDiplomacy(state);
@@ -1031,5 +1046,207 @@ describe("大国キャンペーンAI（設計書 9.4／ユーザー要望）", (
     const next = runDiplomacy(withDeadTarget);
 
     expect(next.campaigns?.[hreId]).toBeUndefined();
+  });
+});
+
+describe("年齢に応じた死亡（仮実装、ユーザー要望：継承システムを実際に発火させるための前提）", () => {
+  function buildState(age: number): GameState {
+    const char = makeCharacter({ id: asCharacterId("char_elder"), name: "老臣", faction: asFactionId("faction_x"), age });
+    return {
+      turn: 1,
+      year: 1000,
+      phase: "year_end",
+      regions: {},
+      factions: {},
+      armies: {},
+      characters: { [char.id]: char },
+      captivities: {},
+      greatWarTriggered: false,
+      playerFactionId: null,
+      spectator: null,
+    };
+  }
+
+  it("乱数が常に最小値なら、死亡確率が0より大きい限り必ず死亡する", () => {
+    const state = buildState(50);
+    const next = runPhase(state, { random: () => 0 });
+
+    expect(next.characters[asCharacterId("char_elder")]?.age).toBe(51);
+    expect(next.characters[asCharacterId("char_elder")]?.alive).toBe(false);
+  });
+
+  it("乱数が確率を上回れば死亡せず、年齢だけ加算される", () => {
+    const state = buildState(50);
+    const next = runPhase(state, { random: () => 0.999 });
+
+    expect(next.characters[asCharacterId("char_elder")]?.age).toBe(51);
+    expect(next.characters[asCharacterId("char_elder")]?.alive).toBe(true);
+  });
+
+  it("既に死亡しているキャラクターは加齢・再判定の対象にならない", () => {
+    const state = buildState(50);
+    const dead: GameState = {
+      ...state,
+      characters: { ...state.characters, [asCharacterId("char_elder")]: { ...state.characters[asCharacterId("char_elder")]!, alive: false } },
+    };
+    const next = runPhase(dead, { random: () => 0 });
+
+    expect(next.characters[asCharacterId("char_elder")]?.age).toBe(50); // 加齢しない
+  });
+});
+
+describe("神聖ローマ皇帝の選挙（設計書 4.4／ユーザー要望）", () => {
+  const mainzId = asFactionId("faction_mainz");
+  const trierId = asFactionId("faction_trier");
+  const cologneId = asFactionId("faction_cologne");
+  const palatinateId = asFactionId("faction_palatinate");
+  const brandenburgId = asFactionId("faction_brandenburg");
+  const bohemiaId = asFactionId("faction_bohemia");
+  const austriaId = asFactionId("faction_austria");
+  const bavariaId = asFactionId("faction_bavaria");
+  const hreId = asFactionId("faction_hre");
+  const papalId = asFactionId("faction_papal");
+
+  function elector(id: FactionId, allyWith: FactionId | null): Faction {
+    return makeFaction({ id, name: id, ruler: null, diplomacy: allyWith ? { [allyWith]: "alliance" } : {} });
+  }
+
+  function baseState(overrides: Partial<GameState>): GameState {
+    return {
+      turn: 1,
+      year: 1000,
+      phase: "year_start",
+      regions: {},
+      factions: {},
+      armies: {},
+      characters: {},
+      captivities: {},
+      greatWarTriggered: false,
+      playerFactionId: null,
+      spectator: null,
+      ...overrides,
+    };
+  }
+
+  it("帝位保持者の家系が存続していれば、選挙は行われない", () => {
+    const hreRuler = makeCharacter({ id: asCharacterId("hre_ruler_title"), name: "皇帝", faction: hreId });
+    const hre = makeFaction({ id: hreId, name: "ザクセン選帝侯領", ruler: hreRuler.id });
+    const state = baseState({
+      factions: { [hreId]: hre },
+      characters: { [hreRuler.id]: hreRuler },
+      imperialTitle: { holderId: hreId, since: 962 },
+    });
+
+    const next = runPhase(state);
+
+    expect(next.imperialTitle).toEqual({ holderId: hreId, since: 962 });
+  });
+
+  it("帝位保持者の家系が断絶すると、選帝侯の過半数と同盟している候補が選ばれる", () => {
+    // hre（帝位保持者）は既に消滅（factions に存在しない）。
+    // オーストリアは4選帝侯、バイエルンは2選帝侯と同盟——オーストリアが選ばれるはず。
+    const mainz = elector(mainzId, austriaId);
+    const trier = elector(trierId, austriaId);
+    const cologne = elector(cologneId, austriaId);
+    const palatinate = elector(palatinateId, austriaId);
+    const brandenburg = elector(brandenburgId, bavariaId);
+    const bohemia = elector(bohemiaId, bavariaId);
+    const austria = makeFaction({ id: austriaId, name: "オーストリア辺境伯領", ruler: null });
+    const bavaria = makeFaction({ id: bavariaId, name: "バイエルン公国", ruler: null });
+
+    const state = baseState({
+      factions: {
+        [mainzId]: mainz,
+        [trierId]: trier,
+        [cologneId]: cologne,
+        [palatinateId]: palatinate,
+        [brandenburgId]: brandenburg,
+        [bohemiaId]: bohemia,
+        [austriaId]: austria,
+        [bavariaId]: bavaria,
+      },
+      imperialTitle: { holderId: hreId, since: 962 },
+    });
+
+    const next = runPhase(state);
+
+    expect(next.imperialTitle?.holderId).toBe(austriaId);
+    expect(next.imperialTitle?.since).toBe(1000);
+  });
+
+  it("選帝侯からの支持が同数の場合、経済力に対し軍事力が小さい候補が選ばれる", () => {
+    const mainz = elector(mainzId, null);
+    const austria = makeFaction({ id: austriaId, name: "オーストリア辺境伯領", ruler: null, treasury: 5000 });
+    const bavaria = makeFaction({ id: bavariaId, name: "バイエルン公国", ruler: null, treasury: 5000, warlords: [asCharacterId("bavaria_general")] });
+    const bavariaGeneral = makeCharacter({ id: asCharacterId("bavaria_general"), name: "バイエルン将軍", faction: bavariaId, role: "warlord" });
+    const bavariaArmy: Army = {
+      id: asArmyId("army_bavaria_big"),
+      faction: bavariaId,
+      commander: bavariaGeneral.id,
+      location: asRegionId("region_bavaria"),
+      units: [{ type: "infantry", count: 10_000, training: 0.8 }],
+      doctrine: "default",
+      morale: 0.8,
+      supply: 1.0,
+    };
+
+    const state = baseState({
+      factions: { [mainzId]: mainz, [austriaId]: austria, [bavariaId]: bavaria },
+      armies: { [bavariaArmy.id]: bavariaArmy },
+      characters: { [bavariaGeneral.id]: bavariaGeneral },
+      imperialTitle: { holderId: hreId, since: 962 },
+    });
+
+    const next = runPhase(state);
+
+    // 同盟数はどちらも0で並ぶが、バイエルンは強大な軍を持つため脅威と見なされ選ばれない。
+    expect(next.imperialTitle?.holderId).toBe(austriaId);
+  });
+
+  it("教皇領と交戦中の候補は除外される", () => {
+    const mainz = elector(mainzId, austriaId); // オーストリアを支持（同盟支持ではオーストリアが優勢）
+    const austria = makeFaction({ id: austriaId, name: "オーストリア辺境伯領", ruler: null, diplomacy: { [papalId]: "war" } });
+    // バイエルンは選帝侯の支持こそ無いが、mainz自身（同盟数0のもう1候補）を上回る経済力を
+    // 持たせ、除外されなかった場合に確実にバイエルンが選ばれるようにする。
+    const bavaria = makeFaction({ id: bavariaId, name: "バイエルン公国", ruler: null, treasury: 100_000 });
+
+    const state = baseState({
+      factions: { [mainzId]: mainz, [austriaId]: austria, [bavariaId]: bavaria },
+      imperialTitle: { holderId: hreId, since: 962 },
+    });
+
+    const next = runPhase(state);
+
+    // 同盟支持で勝るオーストリアは教皇と交戦中のため除外され、バイエルンが選ばれる。
+    expect(next.imperialTitle?.holderId).toBe(bavariaId);
+  });
+});
+
+describe("帝位の特典（設計書 4.4／ユーザー要望）", () => {
+  it("帝位保持者は毎年、通常の税収に加えて帝国税収ボーナスを得る", () => {
+    const hreId = asFactionId("faction_hre");
+    const regionId = asRegionId("region_hre_test");
+    const rulerHre = makeCharacter({ id: asCharacterId("hre_ruler_bonus"), name: "皇帝", faction: hreId });
+    const hre = makeFaction({ id: hreId, name: "ザクセン選帝侯領", ruler: rulerHre.id, regions: [regionId], treasury: 1000 });
+    const region = makeRegion({ id: regionId, owner: hreId, taxBase: 0 }); // 税収を0にして帝国ボーナスだけを見る
+
+    const state: GameState = {
+      turn: 1,
+      year: 1000,
+      phase: "year_end",
+      regions: { [regionId]: region },
+      factions: { [hreId]: hre },
+      armies: {},
+      characters: { [rulerHre.id]: rulerHre },
+      captivities: {},
+      greatWarTriggered: false,
+      playerFactionId: null,
+      spectator: null,
+      imperialTitle: { holderId: hreId, since: 962 },
+    };
+
+    const next = runPhase(state);
+
+    expect(next.factions[hreId]?.treasury).toBe(1000 + 500); // taxBase=0なので純粋にボーナス分のみ増える
   });
 });

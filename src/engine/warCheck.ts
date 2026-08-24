@@ -16,6 +16,17 @@ export interface GreatWarCheckResult {
 }
 
 const GREAT_WAR_THRESHOLD = 2 / 3;
+/**
+ * 大戦が成立しうる最低限の生存勢力数（仮値）。比率だけで判定すると、世界が少数の
+ * 大国へ集約された局面（後継者不在の断絶・征服による自然な淘汰が進んだ終盤、または
+ * 4.4章の死亡・出生の仮実装のように淘汰が早まる状況）で、残り数勢力のうちの
+ * ほんの2〜3勢力が交戦しただけで比率が2/3を超え、「世界大戦」と呼ぶには値しない
+ * 局地紛争が誤って大戦扱いされてしまう（実際にシミュレーションで、生存3〜7勢力
+ * まで淘汰が進んだ状態でこの誤作動を確認した）。「大戦」は多数の独立勢力が並び立つ
+ * 多極的な世界を前提にした概念であるべき、という考えから、これを下回る生存勢力数
+ * では大戦そのものが発生しないようにする。
+ */
+const GREAT_WAR_MIN_ALIVE_FACTIONS = 6;
 
 export function checkGreatWar(state: GameState): GreatWarCheckResult {
   const alive = Object.values(state.factions).filter((f) => f.alive);
@@ -32,7 +43,7 @@ export function checkGreatWar(state: GameState): GreatWarCheckResult {
   const warRatio = alive.length === 0 ? 0 : atWar.length / alive.length;
 
   return {
-    triggered: warRatio >= GREAT_WAR_THRESHOLD,
+    triggered: alive.length >= GREAT_WAR_MIN_ALIVE_FACTIONS && warRatio >= GREAT_WAR_THRESHOLD,
     warRatio,
     atWarFactions: atWar.length,
     aliveFactions: alive.length,

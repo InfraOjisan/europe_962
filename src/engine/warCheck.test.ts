@@ -31,8 +31,28 @@ describe("checkGreatWar", () => {
     expect(result.warRatio).toBe(0);
   });
 
-  it("生存勢力の2/3以上が交戦状態になると発生する", () => {
-    // 5勢力中 4勢力(a, b, c, d) を戦争状態にする。e は diplomacy が空のままなので atWar にはならない。
+  it("生存勢力の2/3以上が交戦状態になると発生する（多極的な世界を前提とするため、最低勢力数を満たす場合）", () => {
+    // 6勢力中 4勢力(a, b, c, d) を戦争状態にする。e・f は diplomacy が空のままなので atWar にはならない。
+    const a = makeFaction("faction_a", { [asFactionId("faction_b")]: "war" });
+    const b = makeFaction("faction_b", { [asFactionId("faction_a")]: "war" });
+    const c = makeFaction("faction_c", { [asFactionId("faction_d")]: "war" });
+    const d = makeFaction("faction_d", { [asFactionId("faction_c")]: "war" });
+    const e = makeFaction("faction_e", {});
+    const f = makeFaction("faction_f", {});
+    const state = {
+      ...createInitialGameState(),
+      factions: Object.fromEntries([a, b, c, d, e, f].map((x) => [x.id, x])),
+    };
+
+    const result = checkGreatWar(state);
+    expect(result.atWarFactions).toBe(4);
+    expect(result.aliveFactions).toBe(6);
+    expect(result.warRatio).toBeCloseTo(4 / 6);
+    expect(result.triggered).toBe(true);
+  });
+
+  it("生存勢力数が最低ライン未満の場合、比率が2/3を超えていても大戦は発生しない（世界が少数の大国へ淘汰された終盤の誤作動防止）", () => {
+    // 5勢力中4勢力が交戦（4/5=0.8 > 2/3）だが、生存数が最低ライン（6）に届かないため見送る。
     const a = makeFaction("faction_a", { [asFactionId("faction_b")]: "war" });
     const b = makeFaction("faction_b", { [asFactionId("faction_a")]: "war" });
     const c = makeFaction("faction_c", { [asFactionId("faction_d")]: "war" });
@@ -40,14 +60,13 @@ describe("checkGreatWar", () => {
     const e = makeFaction("faction_e", {});
     const state = {
       ...createInitialGameState(),
-      factions: Object.fromEntries([a, b, c, d, e].map((f) => [f.id, f])),
+      factions: Object.fromEntries([a, b, c, d, e].map((x) => [x.id, x])),
     };
 
     const result = checkGreatWar(state);
-    expect(result.atWarFactions).toBe(4);
     expect(result.aliveFactions).toBe(5);
-    expect(result.warRatio).toBeCloseTo(4 / 5);
-    expect(result.triggered).toBe(true);
+    expect(result.warRatio).toBeCloseTo(4 / 5); // 比率自体は閾値を超えている
+    expect(result.triggered).toBe(false); // が、最低勢力数に届かないため発生しない
   });
 
   it("臣従（vassal）した勢力の古い戦争ステータスは大戦判定のカウントから除外される（ユーザー報告）", () => {

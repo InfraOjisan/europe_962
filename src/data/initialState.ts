@@ -947,7 +947,10 @@ export const initialCharacters: readonly Character[] = [
 // --- 勢力 ----------------------------------------------------------------------
 
 const factionInputs: readonly FactionInput[] = [
-  { id: "faction_hre", name: "神聖ローマ帝国（ザクセン選帝侯）", ruler: "char_otto1", regions: ["region_saxony"], treasury: 5000, warlords: ["char_burchard"] },
+  // ユーザー要望：「神聖ローマ帝国」を特定の家系に固定しないため、勢力名は他の選帝侯家と
+  // 同格の「ザクセン選帝侯領」とし、帝位そのものは createInitialGameState の
+  // GameState.imperialTitle として独立管理する（設計書 4.4章）。
+  { id: "faction_hre", name: "ザクセン選帝侯領", ruler: "char_otto1", regions: ["region_saxony"], treasury: 5000, warlords: ["char_burchard"] },
   { id: "faction_mainz", name: "マインツ選帝侯領", ruler: "char_mainz_wilhelm", regions: ["region_mainz"], treasury: 1800 },
   { id: "faction_trier", name: "トリーア選帝侯領", ruler: "char_trier_heinrich", regions: ["region_trier"], treasury: 1400 },
   { id: "faction_cologne", name: "ケルン選帝侯領", ruler: "char_cologne_bruno", regions: ["region_cologne"], treasury: 1900 },
@@ -1192,5 +1195,8 @@ export function createInitialGameState(): GameState {
     greatWarTriggered: false,
     playerFactionId: null,
     spectator: null,
+    // 962年：オットー1世の戴冠（史実どおりの開始年）。以後、家系の断絶・服属が起きない
+    // 限り帝位は固定されず選帝侯による選挙で入れ替わりうる（設計書 4.4章、ユーザー要望）。
+    imperialTitle: { holderId: asFactionId("faction_hre"), since: 962 },
   };
 }
