@@ -734,7 +734,17 @@ function advanceCampaigns(state: GameState): GameState {
       const target = state.factions[active.targetFactionId];
       const targetDead = !target || !target.alive;
       const duration = state.year - active.startedYear;
-      if (targetDead || duration > CAMPAIGN_MAX_DURATION_YEARS) {
+      const stance = faction.diplomacy[active.targetFactionId];
+      // annihilateフェイズで、既に宣戦布告を終えているはずの時期
+      // （isolateフェイズの年数を超えて経過している）になっても交戦状態でない場合、
+      // 標的が自発的に和平を申し入れて決着した（またはそもそも宣戦布告が大戦回避の
+      // 最終防波堤に阻まれ続けている）とみなしてキャンペーンを終了する。これが無いと、
+      // annihilateフェイズは「戦争でなければ即座に宣戦布告する」だけの判断を毎年
+      // 繰り返すため、標的が和平を選ぶたびに翌年また宣戦布告——を無限に繰り返す
+      // （ユーザー報告：特定の2勢力が開戦・和平を交互に繰り返す）。
+      const warConcludedByPeace =
+        active.phase === "annihilate" && duration > CAMPAIGN_ISOLATE_PHASE_YEARS && stance !== "war" && stance !== "vassal";
+      if (targetDead || warConcludedByPeace || duration > CAMPAIGN_MAX_DURATION_YEARS) {
         campaigns = removeCampaign(campaigns, greatPowerId);
         changed = true;
         continue;

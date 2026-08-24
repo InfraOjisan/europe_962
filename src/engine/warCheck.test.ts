@@ -49,4 +49,27 @@ describe("checkGreatWar", () => {
     expect(result.warRatio).toBeCloseTo(4 / 5);
     expect(result.triggered).toBe(true);
   });
+
+  it("臣従（vassal）した勢力の古い戦争ステータスは大戦判定のカウントから除外される（ユーザー報告）", () => {
+    // a・b は実際に交戦中。c は d に服属済み（suzerain: d）だが、服属前の古い
+    // 「戦争」ステータスが diplomacy に残ったまま（現実装ではここを掃除しない）。
+    // vassal を除外しなければ a・b・c の3/4=0.75で大戦条件（2/3）を誤って満たしてしまう。
+    const a = makeFaction("faction_a", { [asFactionId("faction_b")]: "war" });
+    const b = makeFaction("faction_b", { [asFactionId("faction_a")]: "war" });
+    const c: Faction = {
+      ...makeFaction("faction_c", { [asFactionId("faction_stale_enemy")]: "war" }),
+      suzerain: asFactionId("faction_d"),
+    };
+    const d = makeFaction("faction_d", { [asFactionId("faction_c")]: "vassal" });
+    const state = {
+      ...createInitialGameState(),
+      factions: Object.fromEntries([a, b, c, d].map((f) => [f.id, f])),
+    };
+
+    const result = checkGreatWar(state);
+    expect(result.atWarFactions).toBe(2); // a, b のみ（c は臣従済みのため除外）
+    expect(result.aliveFactions).toBe(4); // c・d 自体は生存勢力として数える
+    expect(result.warRatio).toBeCloseTo(0.5);
+    expect(result.triggered).toBe(false);
+  });
 });
