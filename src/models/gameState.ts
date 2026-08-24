@@ -4,6 +4,7 @@ import type { Captivity } from "./captivity.js";
 import type { Character } from "./character.js";
 import type { Faction } from "./faction.js";
 import type { ArmyId, CharacterId, FactionId, RegionId } from "./ids.js";
+import type { ImperialTitle } from "./imperialTitle.js";
 import type { Region } from "./region.js";
 
 /**
@@ -62,4 +63,11 @@ export interface GameState {
    * 未設定は「キャンペーン無し」として扱う（`turnEngine.ts` の `getCampaigns` 参照）。
    */
   readonly campaigns?: Readonly<Record<FactionId, Campaign>>;
+  /**
+   * 神聖ローマ皇帝の称号（設計書 4.4／ユーザー要望）。特定の家系に固定しない
+   * 独立した状態として管理する（`models/imperialTitle.ts`）。既存の GameState
+   * リテラル（テスト等）との後方互換のため任意フィールドとし、未設定／null は
+   * 「空位」として扱う。
+   */
+  readonly imperialTitle?: ImperialTitle | null;
 }

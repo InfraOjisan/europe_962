@@ -1,11 +1,13 @@
 import { effectiveStrength, totalTroops, type Army } from "../models/army.js";
 import type { CasualtyReport } from "../models/battle.js";
 import type { Campaign } from "../models/campaign.js";
+import type { Character } from "../models/character.js";
 import { isAtWar, type DiplomaticStance, type Faction } from "../models/faction.js";
-import { asArmyId, asFactionId } from "../models/ids.js";
+import { asArmyId, asCharacterId, asFactionId } from "../models/ids.js";
+import type { ImperialTitle } from "../models/imperialTitle.js";
 import type { FactionId, GameState, Policy, Region, RegionId, TurnPhase } from "../models/index.js";
 import type { DecisionOption, RandomSource } from "./aiPolicy.js";
-import { decideByScoring, defaultRandomSource, scoreOption } from "./aiPolicy.js";
+import { assignRandomPolicy, decideByScoring, defaultRandomSource, scoreOption } from "./aiPolicy.js";
 import type { AIProviderConfig } from "./aiProvider.js";
 import { decideAction } from "./aiProvider.js";
 import { registerCapture } from "./captivity.js";
@@ -14,7 +16,7 @@ import { resolveBattle, type BattleResolutionInput } from "./combatEngine.js";
 import { findEscapeRegion } from "./combatEngine.js";
 import { armyUpkeep, calculateEffectiveTax, garrisonUpkeep, rollWeatherFactor } from "./economy.js";
 import { applyYearStartEvents } from "./eventEngine.js";
-import type { HistoricalEvent } from "../data/historicalEvents.js";
+import { HRE_CORE_FACTION_IDS, HRE_ELECTOR_FACTION_IDS, type HistoricalEvent } from "../data/historicalEvents.js";
 import type { OffMapThreatDefinition } from "../data/offMapThreats.js";
 import { rollOffMapThreats } from "./offMapThreats.js";
 import { applySuccession } from "./succession.js";
@@ -44,6 +46,16 @@ const MAX_ENCOUNTERS_PER_REGION = 20;
  * 持ちかける動機になる（`findThreatNeighbor`）。仮値・要継続バランス調整。
  */
 const THREAT_RATIO_THRESHOLD = 0.75;
+/**
+ * 帝位の特典（設計書 4.4／ユーザー要望）：神聖ローマ皇帝への大義なき開戦は
+ * 正当性（legitimacy）・安全性（safety、他の諸侯の介入を招く政治的リスクとして表現）の
+ * 両スコアをこの分だけ下げる（あくまで穏やかなバイアスであり、絶対的な禁止ではない
+ * ——史実でも皇帝への反乱・帝国追放〈Reichsacht〉は起きている）。仮値・要継続バランス調整。
+ */
+const IMPERIAL_TITLE_WAR_LEGITIMACY_PENALTY = 0.3;
+const IMPERIAL_TITLE_WAR_SAFETY_PENALTY = 0.25;
+/** 帝位保持者への毎年の帝国税収ボーナス（設計書 4.4／ユーザー要望、仮値）。 */
+const IMPERIAL_TITLE_TAX_BONUS = 500;
 
 /**
  * ターン進行の各フェイズに渡す実行時オプション。
@@ -229,6 +241,75 @@ function resolveGarrisonDefense(
   return { ...next, armies };
 }
 
+// --- 神聖ローマ皇帝の継承・選挙（設計書 4.4／ユーザー要望） -------------------
+//
+// 「神聖ローマ帝国」を特定の家系（`faction_hre`）に固定しないための独立した状態
+// （`GameState.imperialTitle`、`models/imperialTitle.ts`）。保持者の家系が存続する
+// 限り帝位はそのまま——「元帝の嫡出子が優先される」というユーザー要望のルールは、
+// 既存の継承システム（`resolveSuccession` が `Faction.heir` を優先する）にそのまま
+// 委ねる形で実現している：帝位保持者の勢力が同じ家系のまま存続すれば、それだけで
+// 「嫡出子（後継者）が継いだ」ことになるため、改めて判定する必要が無い。
+// 保持者の勢力が滅亡・解体（後継者危機で継ぐ者がいなかった場合を含む）、または
+// 誰かに服属した場合にのみ、選帝侯による選挙（`electImperialTitle`）を行う。
+
+/**
+ * 選帝侯による皇帝選挙（ユーザー要望）。優先順位：
+ *   1. 選帝侯7家（`HRE_ELECTOR_FACTION_IDS`）のうち、同盟関係にある家の数が
+ *      最も多い候補を選ぶ（＝選帝侯からの支持が厚い候補）
+ *   2. 同数なら、経済力（`factionEconomicStrength`）に対して軍事力
+ *      （`factionMilitaryStrength`）が小さい候補を優先する——「賄賂を贈れて、
+ *      選帝侯自身の脅威にならない」候補ほど選ばれやすい、というルール
+ *      （史実でルドルフ1世が選ばれた事情の再現）
+ *   3. 教皇領と交戦中の候補は除外する
+ * 候補者プールは帝国本体14勢力（`HRE_CORE_FACTION_IDS`）——史実のルドルフ1世同様、
+ * 選帝侯自身である必要はない。服属中（`suzerain !== null`）の勢力も除外する
+ * （独立して立てる主体ではないため）。該当者がいなければ null（空位）。
+ */
+function electImperialTitle(state: GameState): FactionId | null {
+  const papal = asFactionId("faction_papal");
+  let best: { readonly id: FactionId; readonly allianceCount: number; readonly wealthPerThreat: number } | null = null;
+
+  for (const candidateId of HRE_CORE_FACTION_IDS) {
+    const candidate = state.factions[candidateId];
+    if (!candidate || !candidate.alive || candidate.type !== "lord" || candidate.suzerain !== null) continue;
+    if (candidate.diplomacy[papal] === "war") continue;
+
+    const allianceCount = HRE_ELECTOR_FACTION_IDS.filter((electorId) => {
+      if (electorId === candidateId) return false;
+      const elector = state.factions[electorId];
+      return elector?.alive && elector.diplomacy[candidateId] === "alliance";
+    }).length;
+    const wealthPerThreat = factionEconomicStrength(state, candidateId) / Math.max(1, factionMilitaryStrength(state, candidateId));
+
+    if (
+      !best ||
+      allianceCount > best.allianceCount ||
+      (allianceCount === best.allianceCount && wealthPerThreat > best.wealthPerThreat)
+    ) {
+      best = { id: candidateId, allianceCount, wealthPerThreat };
+    }
+  }
+  return best?.id ?? null;
+}
+
+/**
+ * 帝位の状態を1年分進める。`runYearStart` の継承処理の直後に呼ぶ。
+ * `imperialTitle === undefined`（フィールド自体が無い、既存の GameState リテラルとの
+ * 後方互換）は帝位継承の仕組みを無効化した状態として扱い、以後一切手を付けない。
+ * 対して `imperialTitle === null` は「制度は有効だが現在空位」を意味し、こちらは
+ * 埋まる候補が現れるまで毎年選挙を試み続ける（さもないと一度空位になった帝位が
+ * 二度と埋まらなくなる——シミュレーションで実際に確認したバグ）。
+ */
+function advanceImperialTitle(state: GameState): GameState {
+  if (state.imperialTitle === undefined) return state;
+  const holder = state.imperialTitle ? state.factions[state.imperialTitle.holderId] : null;
+  if (holder && holder.alive && holder.suzerain === null) return state; // 家系が存続中はそのまま
+
+  const winnerId = electImperialTitle(state);
+  const nextTitle: ImperialTitle | null = winnerId ? { holderId: winnerId, since: state.year } : null;
+  return { ...state, imperialTitle: nextTitle };
+}
+
 // --- ① 年始フェイズ ---------------------------------------------------------
 
 function runYearStart(state: GameState, options: TurnEngineOptions): GameState {
@@ -241,6 +322,9 @@ function runYearStart(state: GameState, options: TurnEngineOptions): GameState {
       next = applySuccession(next, ruler.id, faction.id);
     }
   }
+  // 神聖ローマ皇帝の継承・選挙（設計書 4.4／ユーザー要望）。上記の継承処理の直後に行うことで、
+  // 帝位保持者の家系が（平和的に）存続したかどうかを判定できる。
+  next = advanceImperialTitle(next);
   // 史実イベント年表（設計書 11章）。options.events に空配列を渡せば無効化できる。
   next = applyYearStartEvents(next, options.events).state;
   // 版図外勢力（モンゴル・ティムール・オスマン＝ペルシャ等）の天災的襲来（設計書 13章）。
@@ -376,6 +460,10 @@ function buildDiplomaticOptions(
   if (stance === undefined || stance === "vassal") return null;
 
   const ratio = militaryStrengthRatio(state, selfId, counterpartId);
+  // 帝位の特典（実装済み、ユーザー要望）：神聖ローマ皇帝への大義なき開戦は
+  // 正当性（legitimacy）を損なう。`imperialTitle` は特定の家系に固定されないため、
+  // 保持者は史実の推移次第で入れ替わりうる（4.4章）。
+  const isCounterpartEmperor = state.imperialTitle?.holderId === counterpartId;
 
   if (stance === "war") {
     return {
@@ -408,10 +496,10 @@ function buildDiplomaticOptions(
         {
           label: "A",
           description: `${counterpart.name}に宣戦布告する`,
-          safety: clamp01((ratio >= 1.3 ? 0.6 : 0.25) - proximity * 0.4),
+          safety: clamp01((ratio >= 1.3 ? 0.6 : 0.25) - proximity * 0.4 - (isCounterpartEmperor ? IMPERIAL_TITLE_WAR_SAFETY_PENALTY : 0)),
           expansion: ratio >= 1.3 ? 0.9 : 0.4,
           profit: 0.3,
-          legitimacy: 0.1,
+          legitimacy: clamp01(0.1 - (isCounterpartEmperor ? IMPERIAL_TITLE_WAR_LEGITIMACY_PENALTY : 0)),
         },
         {
           label: "B",
@@ -448,10 +536,10 @@ function buildDiplomaticOptions(
       {
         label: "B",
         description: `${counterpart.name}との同盟を破棄して開戦する`,
-        safety: clamp01((ratio >= 1.6 ? 0.45 : 0.1) - proximity * 0.4),
+        safety: clamp01((ratio >= 1.6 ? 0.45 : 0.1) - proximity * 0.4 - (isCounterpartEmperor ? IMPERIAL_TITLE_WAR_SAFETY_PENALTY : 0)),
         expansion: ratio >= 1.6 ? 0.85 : 0.2,
         profit: 0.3,
-        legitimacy: 0.03,
+        legitimacy: clamp01(0.03 - (isCounterpartEmperor ? IMPERIAL_TITLE_WAR_LEGITIMACY_PENALTY : 0)),
       },
     ],
   };
@@ -734,7 +822,17 @@ function advanceCampaigns(state: GameState): GameState {
       const target = state.factions[active.targetFactionId];
       const targetDead = !target || !target.alive;
       const duration = state.year - active.startedYear;
-      if (targetDead || duration > CAMPAIGN_MAX_DURATION_YEARS) {
+      const stance = faction.diplomacy[active.targetFactionId];
+      // annihilateフェイズで、既に宣戦布告を終えているはずの時期
+      // （isolateフェイズの年数を超えて経過している）になっても交戦状態でない場合、
+      // 標的が自発的に和平を申し入れて決着した（またはそもそも宣戦布告が大戦回避の
+      // 最終防波堤に阻まれ続けている）とみなしてキャンペーンを終了する。これが無いと、
+      // annihilateフェイズは「戦争でなければ即座に宣戦布告する」だけの判断を毎年
+      // 繰り返すため、標的が和平を選ぶたびに翌年また宣戦布告——を無限に繰り返す
+      // （ユーザー報告：特定の2勢力が開戦・和平を交互に繰り返す）。
+      const warConcludedByPeace =
+        active.phase === "annihilate" && duration > CAMPAIGN_ISOLATE_PHASE_YEARS && stance !== "war" && stance !== "vassal";
+      if (targetDead || warConcludedByPeace || duration > CAMPAIGN_MAX_DURATION_YEARS) {
         campaigns = removeCampaign(campaigns, greatPowerId);
         changed = true;
         continue;
@@ -1395,6 +1493,89 @@ function runBattleResolution(state: GameState, options: TurnEngineOptions): Game
 
 // --- ⑤ 年末集計フェイズ（設計書 10章：税制・天候・地勢） ----------------------
 
+/**
+ * 年齢に応じた死亡確率（仮実装、設計書 4章）。婚姻システム本格実装までの暫定値で、
+ * 厳密な人口統計モデルではない。中世〜近世の大まかな死亡曲線（壮年期はほぼ死なず、
+ * 高齢になるほど急上昇する）を模す。
+ *
+ * これが無いと当主が死亡することが無く、継承・後継者危機・帝位継承（4.4章）の
+ * いずれも実際には発火しなかった（ユーザー報告により発覚：継承システム自体は
+ * 完成しているが、それを起動する「死亡」イベントが存在していなかった）。
+ */
+function mortalityProbability(age: number): number {
+  if (age < 20) return 0.002;
+  if (age < 40) return 0.005;
+  if (age < 60) return 0.015;
+  if (age < 70) return 0.03;
+  if (age < 80) return 0.06;
+  return 0.12;
+}
+
+/** 生存する全キャラクターを1歳加齢させ、年齢に応じた確率で死亡させる（仮実装）。 */
+function ageAndRollMortality(state: GameState, random: RandomSource): GameState {
+  let characters = state.characters;
+  for (const character of Object.values(state.characters)) {
+    if (!character.alive) continue;
+    const age = character.age + 1;
+    const dies = random() < mortalityProbability(age);
+    characters = { ...characters, [character.id]: { ...character, age, alive: !dies } };
+  }
+  return { ...state, characters };
+}
+
+/** 出産適齢とみなす年齢範囲（仮値）。 */
+const CHILDBEARING_MIN_AGE = 16;
+const CHILDBEARING_MAX_AGE = 45;
+/** 出産適齢の当主に、1年あたり子が生まれる確率（仮値）。 */
+const CHILDBIRTH_PROBABILITY_PER_YEAR = 0.15;
+
+/**
+ * 出生（仮実装、設計書4章）。上記の死亡ロールに対して後継者の供給源が無いと、
+ * 数十年で全ての家系が後継者不在の断絶（`succession.ts` の後継者危機）に陥り、
+ * 帝国どころか大半の勢力が消滅してしまうことを実際のシミュレーションで確認した。
+ *
+ * 婚姻システム本格実装までの最小限のつなぎとして、出産適齢の当主にのみ、一定確率で
+ * 子（`role: "heir"`）が生まれる処理を入れる。当初は「配偶者がいること」も条件にしたが、
+ * それだと初代の（既に配偶者持ちで開始する）当主の代でしか子が生まれず、跡を継いだ
+ * 2代目以降には配偶者を得る手段（婚姻）が無いため即座に血筋が途絶えることが
+ * シミュレーションで判明した。婚姻を経ずに「当主本人の年齢」だけを条件にする形へ
+ * 簡略化し、配偶者は `parents` に含めない（単親記録、婚姻システム実装時に置き換える
+ * 前提の割り切り）。
+ */
+function rollChildbirths(state: GameState, random: RandomSource): GameState {
+  let characters = state.characters;
+  let serial = 0;
+  for (const character of Object.values(state.characters)) {
+    if (!character.alive || character.role !== "ruler") continue;
+    if (character.age < CHILDBEARING_MIN_AGE || character.age > CHILDBEARING_MAX_AGE) continue;
+    if (random() >= CHILDBIRTH_PROBABILITY_PER_YEAR) continue;
+
+    const childId = asCharacterId(`char_born_${character.id}_${state.year}_${serial++}`);
+    const child: Character = {
+      id: childId,
+      name: `${character.name}の子`,
+      role: "heir",
+      faction: character.faction,
+      skills: { command: random(), diplomacy: random(), administration: random() },
+      traits: [],
+      age: 0,
+      alive: true,
+      spouse: null,
+      children: [],
+      parents: [character.id],
+      adoptedChildren: [],
+      adoptedBy: null,
+      policy: assignRandomPolicy(random),
+    };
+    characters = {
+      ...characters,
+      [childId]: child,
+      [character.id]: { ...characters[character.id]!, children: [...characters[character.id]!.children, childId] },
+    };
+  }
+  return { ...state, characters };
+}
+
 function runYearEnd(state: GameState, options: TurnEngineOptions): GameState {
   const random = options.random ?? defaultRandomSource;
   let factions = state.factions;
@@ -1413,6 +1594,14 @@ function runYearEnd(state: GameState, options: TurnEngineOptions): GameState {
     factions = { ...factions, [owner.id]: { ...owner, treasury: owner.treasury + tax } };
   }
 
+  // 帝位の特典（実装済み、ユーザー要望）：保持者に毎年帝国税収を加算する。
+  if (state.imperialTitle) {
+    const holder = factions[state.imperialTitle.holderId];
+    if (holder && holder.alive) {
+      factions = { ...factions, [holder.id]: { ...holder, treasury: holder.treasury + IMPERIAL_TITLE_TAX_BONUS } };
+    }
+  }
+
   // 維持費：州の駐留戦力と、勢力が抱える全軍団の兵数に応じて国庫から差し引く。
   for (const region of Object.values(state.regions)) {
     const owner = factions[region.owner];
@@ -1425,7 +1614,8 @@ function runYearEnd(state: GameState, options: TurnEngineOptions): GameState {
     factions = { ...factions, [army.faction]: { ...owner, treasury: owner.treasury - armyUpkeep(army) } };
   }
 
-  const withEconomy: GameState = { ...state, factions };
+  const aged = ageAndRollMortality({ ...state, factions }, random);
+  const withEconomy: GameState = rollChildbirths(aged, random);
 
   const warCheckResult = checkGreatWar(withEconomy);
   if (warCheckResult.triggered) {

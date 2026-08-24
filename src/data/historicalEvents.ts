@@ -124,12 +124,14 @@ const ASTURIAS = asFactionId("faction_asturias");
 const AUSTRIA = asFactionId("faction_austria");
 
 /**
- * 神聖ローマ帝国「本体」を構成する勢力群（設計書 15章）：選帝侯7家・バイエルン・
- * シュヴァーベン・オーストリア・スペインの道の回廊4勢力。ポーランド・ハンガリー・
- * イタリア諸国は「緩い同盟圏」ではあるが帝国そのものの構成員ではないため含めない。
- * ドイツ農民戦争・三十年戦争など「帝国全域」を舞台とする史実イベントに使う。
+ * 選帝侯7家（設計書 4.4／ユーザー要望：神聖ローマ皇帝選挙）。金印勅書（1356年）で
+ * 制度化された史実の7選帝侯（マインツ・トリーア・ケルン・ボヘミア・プファルツ・
+ * ザクセン・ブランデンブルク）に対応する。`faction_hre`（「ザクセン選帝侯領」）が
+ * ザクセンの枠を占める——本シナリオでは「神聖ローマ帝国」を特定の家系に固定せず、
+ * `GameState.imperialTitle` として独立管理するため（`turnEngine.ts` 参照）。
+ * `turnEngine.ts` の帝位継承ロジックから参照するためエクスポートする。
  */
-const HRE_CORE_FACTION_IDS: readonly FactionId[] = [
+export const HRE_ELECTOR_FACTION_IDS: readonly FactionId[] = [
   HRE,
   asFactionId("faction_mainz"),
   asFactionId("faction_trier"),
@@ -137,6 +139,18 @@ const HRE_CORE_FACTION_IDS: readonly FactionId[] = [
   asFactionId("faction_palatinate"),
   asFactionId("faction_brandenburg"),
   asFactionId("faction_bohemia"),
+];
+
+/**
+ * 神聖ローマ帝国「本体」を構成する勢力群（設計書 15章）：選帝侯7家・バイエルン・
+ * シュヴァーベン・オーストリア・スペインの道の回廊4勢力。ポーランド・ハンガリー・
+ * イタリア諸国は「緩い同盟圏」ではあるが帝国そのものの構成員ではないため含めない。
+ * ドイツ農民戦争・三十年戦争など「帝国全域」を舞台とする史実イベントに使うほか、
+ * 帝位（`imperialTitle`）の被選挙資格プールとしても使う（選帝侯自身である必要はない
+ * ——史実のルドルフ1世同様、非選帝侯からも選出されうる）。
+ */
+export const HRE_CORE_FACTION_IDS: readonly FactionId[] = [
+  ...HRE_ELECTOR_FACTION_IDS,
   asFactionId("faction_bavaria"),
   asFactionId("faction_swabia"),
   AUSTRIA,

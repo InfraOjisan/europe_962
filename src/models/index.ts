@@ -8,4 +8,5 @@ export * from "./faction.js";
 export * from "./battle.js";
 export * from "./captivity.js";
 export * from "./campaign.js";
+export * from "./imperialTitle.js";
 export * from "./gameState.js";
