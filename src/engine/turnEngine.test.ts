@@ -1250,3 +1250,111 @@ describe("帝位の特典（設計書 4.4／ユーザー要望）", () => {
     expect(next.factions[hreId]?.treasury).toBe(1000 + 500); // taxBase=0なので純粋にボーナス分のみ増える
   });
 });
+
+describe("無主化した州の接収（設計書 4.3章／ユーザー報告：滅亡した州がいつまでも占領されない）", () => {
+  it("滅亡した勢力の州には、戦争状態でなくても隣国の軍が進出して接収できる", () => {
+    const deadId = asFactionId("faction_dead");
+    const livingId = asFactionId("faction_living");
+    const deadRegionId = asRegionId("region_dead");
+    const homeRegionId = asRegionId("region_home");
+    const rulerLiving = makeCharacter({ id: asCharacterId("living_ruler"), name: "隣国の君主", faction: livingId, policy: "expansionism" });
+    const armyId = asArmyId("army_living");
+
+    const deadRegion = makeRegion({ id: deadRegionId, owner: deadId, adjacency: [homeRegionId], garrison: { count: 0, training: 0 } });
+    const homeRegion = makeRegion({ id: homeRegionId, owner: livingId, adjacency: [deadRegionId] });
+    const deadFaction = makeFaction({ id: deadId, name: "滅亡した勢力", ruler: null, alive: false, regions: [deadRegionId] });
+    const livingFaction = makeFaction({ id: livingId, name: "隣国", ruler: rulerLiving.id, regions: [homeRegionId], diplomacy: {} }); // deadId との関係は無い（戦争状態ではない）
+
+    const army: Army = {
+      id: armyId,
+      faction: livingId,
+      commander: null,
+      location: homeRegionId,
+      units: [{ type: "infantry", count: 1000, training: 0.5 }],
+      doctrine: "default",
+      morale: 0.7,
+      supply: 1.0,
+    };
+
+    const state: GameState = {
+      turn: 1,
+      year: 1000,
+      phase: "action",
+      regions: { [deadRegionId]: deadRegion, [homeRegionId]: homeRegion },
+      factions: { [deadId]: deadFaction, [livingId]: livingFaction },
+      armies: { [armyId]: army },
+      characters: { [rulerLiving.id]: rulerLiving },
+      captivities: {},
+      greatWarTriggered: false,
+      playerFactionId: null,
+      spectator: null,
+    };
+
+    const afterAction = runPhase(state); // action: 軍が無主化した州へ進出する
+    const afterBattle = runPhase(afterAction); // battle_resolution: 接収が確定する
+
+    expect(afterBattle.regions[deadRegionId]?.owner).toBe(livingId);
+    expect(afterBattle.factions[livingId]?.regions).toContain(deadRegionId);
+    expect(afterBattle.factions[deadId]?.regions).not.toContain(deadRegionId);
+    expect(validateGameState(afterBattle).issues).toEqual([]);
+  });
+
+  it("滅亡した勢力が複数の州を領有していた場合、それぞれ別々の隣国に接収されても取りこぼさない", () => {
+    // 退行テスト：resolveInterregnumAnnexation が旧領有勢力の regions を更新する際、
+    // 累積中ではなく元の state.factions から読み直していたため、2州目以降の処理が
+    // 1州目の取り除きを巻き戻してしまうバグがあった（validateGameState で発覚）。
+    const deadId = asFactionId("faction_dead2");
+    const livingAId = asFactionId("faction_living_a");
+    const livingBId = asFactionId("faction_living_b");
+    const deadRegion1Id = asRegionId("region_dead2_1");
+    const deadRegion2Id = asRegionId("region_dead2_2");
+    const homeAId = asRegionId("region_home_a");
+    const homeBId = asRegionId("region_home_b");
+
+    const rulerA = makeCharacter({ id: asCharacterId("living_a_ruler"), name: "A国の君主", faction: livingAId, policy: "expansionism" });
+    const rulerB = makeCharacter({ id: asCharacterId("living_b_ruler"), name: "B国の君主", faction: livingBId, policy: "expansionism" });
+
+    const deadRegion1 = makeRegion({ id: deadRegion1Id, owner: deadId, adjacency: [homeAId], garrison: { count: 0, training: 0 } });
+    const deadRegion2 = makeRegion({ id: deadRegion2Id, owner: deadId, adjacency: [homeBId], garrison: { count: 0, training: 0 } });
+    const homeA = makeRegion({ id: homeAId, owner: livingAId, adjacency: [deadRegion1Id] });
+    const homeB = makeRegion({ id: homeBId, owner: livingBId, adjacency: [deadRegion2Id] });
+
+    const deadFaction = makeFaction({ id: deadId, name: "滅亡した勢力2", ruler: null, alive: false, regions: [deadRegion1Id, deadRegion2Id] });
+    const livingA = makeFaction({ id: livingAId, name: "A国", ruler: rulerA.id, regions: [homeAId], diplomacy: {} });
+    const livingB = makeFaction({ id: livingBId, name: "B国", ruler: rulerB.id, regions: [homeBId], diplomacy: {} });
+
+    const armyA: Army = {
+      id: asArmyId("army_living_a"),
+      faction: livingAId,
+      commander: null,
+      location: homeAId,
+      units: [{ type: "infantry", count: 1000, training: 0.5 }],
+      doctrine: "default",
+      morale: 0.7,
+      supply: 1.0,
+    };
+    const armyB: Army = { ...armyA, id: asArmyId("army_living_b"), faction: livingBId, location: homeBId };
+
+    const state: GameState = {
+      turn: 1,
+      year: 1000,
+      phase: "action",
+      regions: { [deadRegion1Id]: deadRegion1, [deadRegion2Id]: deadRegion2, [homeAId]: homeA, [homeBId]: homeB },
+      factions: { [deadId]: deadFaction, [livingAId]: livingA, [livingBId]: livingB },
+      armies: { [armyA.id]: armyA, [armyB.id]: armyB },
+      characters: { [rulerA.id]: rulerA, [rulerB.id]: rulerB },
+      captivities: {},
+      greatWarTriggered: false,
+      playerFactionId: null,
+      spectator: null,
+    };
+
+    const afterAction = runPhase(state);
+    const afterBattle = runPhase(afterAction);
+
+    expect(afterBattle.regions[deadRegion1Id]?.owner).toBe(livingAId);
+    expect(afterBattle.regions[deadRegion2Id]?.owner).toBe(livingBId);
+    expect(afterBattle.factions[deadId]?.regions).toEqual([]); // 両方とも正しく取り除かれている
+    expect(validateGameState(afterBattle).issues).toEqual([]);
+  });
+});
