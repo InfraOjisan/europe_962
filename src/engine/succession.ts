@@ -255,9 +255,13 @@ export function spawnCivilWarFactions(state: GameState, originalFactionId: Facti
   const newFactions: Record<string, Faction> = {};
   claimants.forEach((claimant, i) => {
     const id = claimantFactionIds[i]!;
+    // 表示名には CharacterId（内部識別子）ではなく、その人物の実際の名前を使う
+    // （ユーザー報告：出生キャラクター（`char_born_...`）のIDがそのまま
+    // 「イングランド王国（分派: char_born_char_born_...）」のように画面に出てしまっていた）。
+    const claimantName = state.characters[claimant.character]?.name ?? claimant.character;
     newFactions[id] = {
       id,
-      name: `${original.name}（分派: ${claimant.character}）`,
+      name: `${original.name}（分派: ${claimantName}）`,
       type: "lord",
       ruler: claimant.character,
       consort: null,

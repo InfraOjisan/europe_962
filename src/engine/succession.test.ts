@@ -343,4 +343,28 @@ describe("spawnCivilWarFactions", () => {
     const result = validateGameState(next);
     expect(result.issues).toEqual([]);
   });
+
+  it("分派勢力の表示名には CharacterId ではなく人物の実際の名前を使う（ユーザー報告）", () => {
+    // 内部識別子（CharacterId）がそのまま画面に出てしまっていた（例：出生キャラクターの
+    // 「char_born_char_born_...」のような長いID）不具合の回帰テスト。
+    const factionId = asFactionId("faction_a");
+    const claimant1 = makeCharacter({ id: asCharacterId("char_born_deeply_nested_id"), name: "エドワード", faction: asFactionId("faction_b") });
+    const claimant2 = makeCharacter({ id: asCharacterId("c2"), name: "エドマンド", faction: asFactionId("faction_c") });
+
+    const faction = makeFaction({ id: factionId, name: "分裂する家", ruler: null, regions: [] });
+    const factionOfClaimant1 = makeFaction({ id: claimant1.faction, name: "B家", ruler: claimant1.id });
+    const factionOfClaimant2 = makeFaction({ id: claimant2.faction, name: "C家", ruler: claimant2.id });
+    // spawnCivilWarFactions は claimants.length >= 2 を要求する。
+    const state = makeState([faction, factionOfClaimant1, factionOfClaimant2], [claimant1, claimant2]);
+    const claimants = [
+      { character: claimant1.id, faction: claimant1.faction, degree: 3, claimStrength: 1 },
+      { character: claimant2.id, faction: claimant2.faction, degree: 3, claimStrength: 1 },
+    ];
+
+    const next = spawnCivilWarFactions(state, factionId, claimants);
+
+    const claimantFactionId = asFactionId(`${factionId}_claimant_${claimant1.id}`);
+    expect(next.factions[claimantFactionId]?.name).toBe("分裂する家（分派: エドワード）");
+    expect(next.factions[claimantFactionId]?.name).not.toContain(claimant1.id);
+  });
 });
