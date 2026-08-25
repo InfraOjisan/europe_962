@@ -1152,7 +1152,14 @@ function buildActionOptions(
   for (const neighborId of region.adjacency) {
     const neighbor = state.regions[neighborId];
     if (!neighbor) continue;
-    if (selfFaction.diplomacy[neighbor.owner] !== "war") continue;
+    const neighborOwner = state.factions[neighbor.owner];
+    // 無主化した州（領有勢力が滅亡・断絶したが、州の owner フィールドはその旧勢力IDの
+    // ままになっている——設計書 4.3章「無主化」）：owner が生存していなければ、戦争状態を
+    // 問わず「接収する」選択肢を出す（ユーザー報告：滅亡した勢力の州がいつまでも
+    // 誰にも占領されず空白のまま残り続けていた。実際の接収処理は `runBattleResolution` の
+    // `resolveInterregnumAnnexation` が行う）。傭兵団は領地を持たない設計のため対象外。
+    const isInterregnum = selfFaction.type === "lord" && (!neighborOwner || !neighborOwner.alive);
+    if (!isInterregnum && selfFaction.diplomacy[neighbor.owner] !== "war") continue;
     hasAdjacentInvasionTarget = true;
     targetedNeighborIds.add(neighborId);
 
@@ -1163,14 +1170,25 @@ function buildActionOptions(
     const ratio = selfStrength / Math.max(1, defenderStrength);
 
     const label = nextLabel();
-    options.push({
-      label,
-      description: `${neighbor.name}へ侵攻する`,
-      safety: clamp01((ratio >= 1 ? 0.65 : 0.3) - proximity * 0.2),
-      expansion: clamp01((ratio >= 1 ? 0.95 : 0.45) + campaignIsolationBonus(state, army.faction, neighbor)),
-      profit: 0.4,
-      legitimacy: 0.2,
-    });
+    options.push(
+      isInterregnum
+        ? {
+            label,
+            description: `${neighbor.name}（無主化）を接収する`,
+            safety: clamp01(0.8 - proximity * 0.1),
+            expansion: 0.9,
+            profit: 0.4,
+            legitimacy: 0.5,
+          }
+        : {
+            label,
+            description: `${neighbor.name}へ侵攻する`,
+            safety: clamp01((ratio >= 1 ? 0.65 : 0.3) - proximity * 0.2),
+            expansion: clamp01((ratio >= 1 ? 0.95 : 0.45) + campaignIsolationBonus(state, army.faction, neighbor)),
+            profit: 0.4,
+            legitimacy: 0.2,
+          },
+    );
     targetsByLabel.set(label, { kind: "move", to: neighborId });
   }
 
@@ -1412,6 +1430,49 @@ export function detectFlanking(attackerFaction: FactionId, attackerArmyId: Army[
   );
 }
 
+/**
+ * 無主化した州（領有していた勢力が滅亡・断絶したが、`Region.owner` は旧勢力IDのまま
+ * 残っている状態——設計書 4.3章）を、そこに居合わせた生存勢力の軍が無血に近い形で
+ * 接収する。`succession.ts` の `collapseFaction` は「実際の無血占領の可否判定は
+ * 戦闘解決エンジン側の責務とする」とだけ書いて実装されておらず、無主化した州が
+ * いつまでも誰にも占領されないままになっていた（ユーザー報告により発覚）。
+ * 複数勢力の軍が同時に居合わせた場合は、最も実効兵力の大きい軍の勢力が接収する。
+ * 傭兵団（領地を持たない設計）は対象外。
+ */
+function resolveInterregnumAnnexation(state: GameState): GameState {
+  let regions = state.regions;
+  let factions = state.factions;
+
+  for (const region of Object.values(state.regions)) {
+    // 累積中の factions から読む（同じ滅亡勢力が複数州を領有していた場合、前の州の処理で
+    // 既に regions から取り除いた更新を、後の州の処理が古い state.factions から読み直して
+    // 上書き・巻き戻してしまうバグを避けるため）。
+    const owner = factions[region.owner];
+    if (owner && owner.alive) continue; // 通常どおり誰かが領有している
+
+    const claimants = Object.values(state.armies).filter((a) => {
+      if (a.location !== region.id) return false;
+      const faction = state.factions[a.faction];
+      return faction && faction.alive && faction.type === "lord";
+    });
+    if (claimants.length === 0) continue;
+
+    const strongest = claimants.reduce((best, a) => (effectiveStrength(a) > effectiveStrength(best) ? a : best));
+    const newOwner = factions[strongest.faction];
+    if (!newOwner || newOwner.regions.includes(region.id)) continue;
+
+    regions = { ...regions, [region.id]: { ...region, owner: strongest.faction, garrison: { count: 0, training: 0 } } };
+    factions = {
+      ...factions,
+      [strongest.faction]: { ...newOwner, regions: [...newOwner.regions, region.id] },
+      // 旧領有勢力（滅亡済み）の regions からも取り除く（validateGameState の整合性チェック対応）。
+      ...(owner ? { [owner.id]: { ...owner, regions: owner.regions.filter((id) => id !== region.id) } } : {}),
+    };
+  }
+
+  return { ...state, regions, factions };
+}
+
 function runBattleResolution(state: GameState, options: TurnEngineOptions): GameState {
   const guards = options.guards;
   let next = state;
@@ -1488,6 +1549,7 @@ function runBattleResolution(state: GameState, options: TurnEngineOptions): Game
     }
   }
 
+  next = resolveInterregnumAnnexation(next);
   return { ...next, phase: "year_end" };
 }
 
